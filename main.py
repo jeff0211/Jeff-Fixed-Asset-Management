@@ -143,7 +143,7 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                         {'name': 'name', 'label': 'Category Name', 'field': 'name', 'align': 'left'},
                         {'name': 'actions', 'label': 'Actions', 'field': 'actions', 'align': 'center'}
                     ]
-                    cat_table = ui.table(columns=cat_cols, rows=[], row_key='id', pagination=5).classes('w-full text-stone-800').props('flat bordered dense')
+                    cat_table = ui.table(columns=cat_cols, rows=[], row_key='id', pagination=5).classes('w-full text-stone-800').props('flat bordered dense').style('height: 260px')
                     
                     cat_table.add_slot('body-cell-actions', '''
                         <q-td :props="props">
@@ -197,7 +197,7 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                         {'name': 'name', 'label': 'Location Name', 'field': 'name', 'align': 'left'},
                         {'name': 'actions', 'label': 'Actions', 'field': 'actions', 'align': 'center'}
                     ]
-                    loc_table = ui.table(columns=loc_cols, rows=[], row_key='id', pagination=5).classes('w-full text-stone-800').props('flat bordered dense')
+                    loc_table = ui.table(columns=loc_cols, rows=[], row_key='id', pagination=5).classes('w-full text-stone-800').props('flat bordered dense').style('height: 260px')
                     loc_table.add_slot('body-cell-actions', '''
                         <q-td :props="props">
                             <q-btn flat dense icon="edit" color="primary" @click="() => $parent.$emit('edit', props.row)" />
@@ -247,11 +247,11 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                 with ui.card().classes('w-full bg-white border border-stone-200 shadow-none rounded-sm p-6'):
                     ui.label('Depreciation Rates').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-4 w-full')
                     
-                    dep_msg = ui.label('Connecting...').classes('text-sm text-stone-500 mb-2')
+                    dep_msg = ui.label('Connecting...').classes('text-sm text-stone-500')
                     
                     dep_cols = [
                         {'name': 'rate_name', 'label': 'Rate Name', 'field': 'rate_name', 'align': 'left'},
-                        {'name': 'percentage', 'label': 'Percentage (%)', 'field': 'percentage', 'align': 'right'},
+                        {'name': 'percentage', 'label': 'Percentage (%)', 'field': 'percentage', 'align': 'center'},
                         {'name': 'actions', 'label': 'Actions', 'field': 'actions', 'align': 'center'}
                     ]
                     dep_table = ui.table(columns=dep_cols, rows=[], row_key='id', pagination=5).classes('w-full text-stone-800').props('flat bordered dense')
@@ -265,10 +265,11 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                     def load_dep():
                         try:
                             dep_table.rows = supabase.table('depreciation_rates').select('*').order('id').execute().data
-                            dep_msg.set_text('')
+                            dep_msg.set_visibility(False)
                         except Exception as e:
+                            dep_msg.set_visibility(True)
                             dep_msg.set_text('Note: Table "depreciation_rates" missing or schema mismatch (needs: id, rate_name, percentage).')
-                            dep_msg.classes('text-red-500')
+                            dep_msg.classes('text-red-500 mb-2')
                             
                     def del_dep(row):
                         supabase.table('depreciation_rates').delete().eq('id', row['id']).execute()
