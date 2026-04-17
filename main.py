@@ -76,4 +76,4 @@ with ui.tab_panels(tabs, value=tab_view).classes('w-full'):
         ui.table(columns=columns, rows=asset_data, row_key='asset_tag').classes('w-full')
 
 # --- RUN THE APP ---
-ui.run(title="Asset App", port=8080)
+ui.run(title="Asset App", port=8080) # "testing change"
