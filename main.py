@@ -74,22 +74,87 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
         # --- TAB: ADD ASSET ---
         with ui.tab_panel(tab_add):
             
-            # Form Card: Pure white, thin border, sharp corners (rounded-sm)
+            # Helper functions to grab the live menus from Supabase
+            def get_cat_options():
+                try: return {row['id']: row['name'] for row in supabase.table('categories').select('*').execute().data}
+                except Exception: return {}
+
+            def get_loc_options():
+                try: return {row['id']: row['name'] for row in supabase.table('locations').select('*').execute().data}
+                except Exception: return {}
+
+            def get_rate_options():
+                try: return {row['percentage']: row['rate_name'] for row in supabase.table('depreciation_rates').select('*').execute().data}
+                except Exception: return {}
+
+            # Form Card: Pure white, thin border, sharp corners
             with ui.card().classes('w-full max-w-2xl bg-white border border-stone-200 shadow-none rounded-sm p-8 mx-auto'):
                 ui.label('New Asset Details').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-6 w-full')
                 
-                # Inputs: outlined props make them look like simple paper forms
-                asset_tag = ui.input('Asset Tag (e.g., TRAC-2026-001)').classes('w-full mb-2').props('outlined dense')
-                name = ui.input('Description').classes('w-full mb-2').props('outlined dense')
-                status = ui.select(['Active', 'In Maintenance', 'Disposed'], value='Active', label='Status').classes('w-full mb-6').props('outlined dense')
+                # Top Row: Text Inputs
+                asset_tag = ui.input('Asset Tag (e.g., TRAC-2026-001)').classes('w-full mb-4').props('outlined dense')
+                name = ui.input('Description').classes('w-full mb-4').props('outlined dense')
                 
+                # Middle Row: Foreign Key Dropdowns (Categories & Locations)
+                with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                    cat_select = ui.select(get_cat_options(), label='Category').classes('w-1/2').props('outlined dense')
+                    loc_select = ui.select(get_loc_options(), label='Location').classes('w-1/2').props('outlined dense')
+
+                # Bottom Row: Price & Rate
+                with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                    # Number input ensures they can't type letters into the price
+                    price = ui.number('Purchase Price (RM)', format='%.2f').classes('w-1/2').props('outlined dense')
+                    # with_input=True allows them to type a custom rate if it's not in the menu!
+                    rate_select = ui.select(get_rate_options(), label='Depreciation Rate', with_input=True).classes('w-1/2').props('outlined dense')
+
+                status = ui.select(['Active', 'In Maintenance', 'Disposed'], value='Active', label='Status').classes('w-full mb-2').props('outlined dense')
+
+                # Tiny refresh button so staff can sync the dropdowns if maintenance was updated
+                with ui.row().classes('w-full justify-end mb-4'):
+                    def refresh_dropdowns():
+                        cat_select.options = get_cat_options()
+                        cat_select.update()
+                        loc_select.options = get_loc_options()
+                        loc_select.update()
+                        rate_select.options = get_rate_options()
+                        rate_select.update()
+                        ui.notify('Dropdowns synced with master data', type='info', position='top-right')
+                    ui.button('↻ Sync Options', on_click=refresh_dropdowns).props('flat dense').classes('text-stone-400 text-xs tracking-wider')
+
+                # The Save Logic
                 def save_asset():
-                    ui.notify(f'Recorded {asset_tag.value}', position='top', type='positive')
-                    asset_tag.value = ''
-                    name.value = ''
+                    # 1. Validation Check
+                    if not asset_tag.value or not name.value or price.value is None:
+                        ui.notify('Please fill in the Tag, Description, and Price.', type='warning', position='top')
+                        return
                     
-                # Primary Button: Uses that signature Muji Red, unelevated
-                ui.button('Save Record', on_click=save_asset).classes('w-full py-2 tracking-wide font-light').props('unelevated')
+                    try:
+                        # 2. Push to Database
+                        supabase.table('assets').insert({
+                            'asset_tag': asset_tag.value,
+                            'name': name.value,
+                            'category_id': cat_select.value, # Foreign key link!
+                            'location_id': loc_select.value, # Foreign key link!
+                            'purchase_price': float(price.value),
+                            'depreciation_rate': float(rate_select.value) if rate_select.value else 0.0,
+                            'status': status.value
+                        }).execute()
+                        
+                        ui.notify(f'Successfully recorded {asset_tag.value}', position='top', type='positive')
+                        
+                        # 3. Clear the form for the next entry
+                        asset_tag.value = ''
+                        name.value = ''
+                        price.value = None
+                        cat_select.value = None
+                        loc_select.value = None
+                        rate_select.value = None
+                        
+                    except Exception as e:
+                        ui.notify(f'Database error: Please check your data or foreign keys. ({e})', type='negative')
+                        
+                # Primary Button
+                ui.button('Save Record', on_click=save_asset).classes('w-full py-2 tracking-wide font-light bg-[#7F0019] text-white').props('unelevated')
                 
         # --- TAB: DISPOSAL ---
         with ui.tab_panel(tab_disposal):
