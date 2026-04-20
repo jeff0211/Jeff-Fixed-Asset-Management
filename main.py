@@ -59,7 +59,7 @@ with ui.header().classes('bg-[#8b6854] border-b border-stone-200 text-white item
     ui.label('Fixed Assets Module Demo').classes('text-xl tracking-wide font-light')
     
     # "Flat" button style for logout to keep it minimal
-    ui.button('Sign Out', color='accent').props('flat').classes('text-sm tracking-wider')
+    ui.button('Sign Out', color='accent').props('flat').classes('text-sm tracking-wider font-light text-white')
 
 # Main Container: Center the content and restrict the width so it doesn't stretch too far on wide monitors
 with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
