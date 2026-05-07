@@ -115,6 +115,121 @@ def _disposal_acc_dep_at(disposal, original_cost, rate, py):
     return min(monthly * share * months_at_disposal, disp_cost)
 
 
+def _parent_full_disposal_ym(parent_disposals, original_cost):
+    """Find (year, month) when parent's cumulative disposed cost reaches original cost.
+    Returns (None, None) if parent is not yet fully disposed."""
+    if not parent_disposals or not original_cost or original_cost <= 0:
+        return None, None
+    sorted_disp = sorted(
+        parent_disposals,
+        key=lambda d: (d.get('disposal_date') or '9999-12-31'),
+    )
+    cum = 0.0
+    for d in sorted_disp:
+        cum += float(d.get('total_disposal_cost') or 0)
+        if cum >= original_cost - 0.01:
+            return _disposal_year(d), _disposal_month(d)
+    return None, None
+
+
+def _build_addition_row(add, parent_a, year, month, parent_disp_y, parent_disp_m):
+    """Compute one report row for an addition, cascading disposal with the parent."""
+    add_cost = float(add.get('addition_cost') or 0)
+    rate_pct = float(add.get('depreciation_rate') or 0)
+    rate = rate_pct / 100.0
+
+    py = _resolve_purchase_year(add)
+    if py is None or py > year:
+        return None
+
+    addition_in_year = (py == year)
+    parent_disposed_past = (
+        parent_disp_y is not None and parent_disp_y < year
+    )
+    parent_disposed_in_period = (
+        parent_disp_y is not None
+        and parent_disp_y == year
+        and parent_disp_m is not None
+        and parent_disp_m <= month
+    )
+
+    if parent_disposed_past:
+        cost_bf = 0.0
+        cost_addition = 0.0
+        cost_disposal = 0.0
+        cost_cf = 0.0
+    elif parent_disposed_in_period:
+        cost_bf = 0.0 if addition_in_year else add_cost
+        cost_addition = add_cost if addition_in_year else 0.0
+        cost_disposal = add_cost
+        cost_cf = 0.0
+    else:
+        cost_bf = 0.0 if addition_in_year else add_cost
+        cost_addition = add_cost if addition_in_year else 0.0
+        cost_disposal = 0.0
+        cost_cf = add_cost
+
+    monthly_charge_full = (add_cost * rate) / 12.0
+    months_dep_BF = 0 if py >= year else (year - py) * 12
+    months_dep_period_end = (year - py) * 12 + month if py <= year else 0
+
+    if parent_disp_y is not None:
+        max_months_at_disposal = max(0, (parent_disp_y - py) * 12 + (parent_disp_m or 12))
+        months_dep_BF = min(months_dep_BF, max_months_at_disposal)
+        months_dep_period_end = min(months_dep_period_end, max_months_at_disposal)
+
+    acc_dep_full_BF = min(monthly_charge_full * months_dep_BF, add_cost)
+    acc_dep_full_at_period = min(monthly_charge_full * months_dep_period_end, add_cost)
+
+    if parent_disposed_past:
+        acc_dep_bf = 0.0
+        acc_dep_disposal = 0.0
+        current_charge = 0.0
+        acc_dep_cf = 0.0
+    elif parent_disposed_in_period:
+        acc_dep_bf = acc_dep_full_BF
+        current_charge = max(acc_dep_full_at_period - acc_dep_bf, 0.0)
+        acc_dep_disposal = acc_dep_bf + current_charge
+        acc_dep_cf = 0.0
+    else:
+        acc_dep_bf = acc_dep_full_BF
+        acc_dep_disposal = 0.0
+        current_charge = max(acc_dep_full_at_period - acc_dep_bf, 0.0)
+        current_charge = min(current_charge, max(cost_cf - acc_dep_bf, 0.0))
+        acc_dep_cf = acc_dep_bf + current_charge
+
+    nbv_current = cost_cf - acc_dep_cf
+    nbv_prior = (0.0 if (addition_in_year or parent_disposed_past) else add_cost) - acc_dep_bf
+
+    desc = add.get('description') or 'Addition'
+    return {
+        'category': parent_a['categories']['name'] if parent_a.get('categories') else 'Uncategorized',
+        'location': parent_a['locations']['name'] if parent_a.get('locations') else 'No location',
+        'description': f'+ {desc}',
+        'reference': '',
+        'unit': add.get('quantity') or 0,
+        'depreciation_rate': rate,
+        'year_of_purchase': py,
+        'cost_bf': cost_bf,
+        'cost_addition': cost_addition,
+        'cost_disposal': cost_disposal,
+        'cost_transfer_in': 0.0,
+        'cost_transfer_inout': 0.0,
+        'cost_cf': cost_cf,
+        'acc_dep_bf': acc_dep_bf,
+        'acc_dep_disposal': acc_dep_disposal,
+        'acc_dep_transfer_in': 0.0,
+        'acc_dep_transfer_inout': 0.0,
+        'current_charge': current_charge,
+        'monthly_charge': monthly_charge_full,
+        'acc_dep_cf': acc_dep_cf,
+        'nbv_current': nbv_current,
+        'nbv_prior': nbv_prior,
+        '_is_addition': True,
+        '_parent_id': add.get('parent_asset_id'),
+    }
+
+
 def compute_period_rows(year, month):
     """Per-asset values as at end of the chosen month within the report year."""
     assets = supabase.table('assets').select(
@@ -123,11 +238,20 @@ def compute_period_rows(year, month):
         'categories(name), locations(name)'
     ).execute().data
     disposals = supabase.table('disposals').select('*').execute().data
+    try:
+        additions = supabase.table('asset_additions').select('*').execute().data
+    except Exception:
+        additions = []
 
     disp_by_asset = defaultdict(list)
     for d in disposals:
         if d.get('asset_id'):
             disp_by_asset[d['asset_id']].append(d)
+
+    add_by_asset = defaultdict(list)
+    for a in additions:
+        if a.get('parent_asset_id'):
+            add_by_asset[a['parent_asset_id']].append(a)
 
     def is_past(d):
         dy = _disposal_year(d)
@@ -214,7 +338,17 @@ def compute_period_rows(year, month):
             'acc_dep_cf': acc_dep_cf,
             'nbv_current': nbv_current,
             'nbv_prior': nbv_prior,
+            '_is_addition': False,
+            '_parent_id': a['id'],
         })
+
+        # Cascade-disposal: if parent's cumulative disposals fully consumed
+        # original cost, treat additions as virtually disposed at that date.
+        parent_disp_y, parent_disp_m = _parent_full_disposal_ym(all_disposals, original_cost)
+        for add in add_by_asset.get(a['id'], []):
+            add_row = _build_addition_row(add, a, year, month, parent_disp_y, parent_disp_m)
+            if add_row is not None:
+                rows.append(add_row)
     return rows
 
 
@@ -302,10 +436,17 @@ def build_period_workbook(year, month):
     apply_border(7)
     ws.row_dimensions[6].height = 50
 
-    # Group rows by category → location
-    grouped = defaultdict(lambda: defaultdict(list))
+    # Group rows by category → location → parent_id, with parent and additions kept together
+    grouped = defaultdict(lambda: defaultdict(list))  # category → location → list of parent_id (in insertion order)
+    parent_lookup = {}                                # parent_id → parent row
+    addition_buckets = defaultdict(list)              # parent_id → list of addition rows
     for r in rows:
-        grouped[r['category']][r['location']].append(r)
+        if r.get('_is_addition'):
+            addition_buckets[r['_parent_id']].append(r)
+        else:
+            pid = r['_parent_id']
+            parent_lookup[pid] = r
+            grouped[r['category']][r['location']].append(pid)
 
     SUM_FIELDS = ['cost_bf', 'cost_addition', 'cost_disposal', 'cost_transfer_in', 'cost_transfer_inout',
                   'cost_cf', 'acc_dep_bf', 'acc_dep_disposal', 'acc_dep_transfer_in', 'acc_dep_transfer_inout',
@@ -317,8 +458,11 @@ def build_period_workbook(year, month):
         'monthly_charge': 18, 'acc_dep_cf': 19, 'nbv_current': 20, 'nbv_prior': 21,
     }
 
-    def write_data_row(rowidx, r):
-        ws.cell(row=rowidx, column=1, value=r['description'])
+    def write_data_row(rowidx, r, indent=0):
+        desc_cell = ws.cell(row=rowidx, column=1, value=r['description'])
+        if indent:
+            desc_cell.alignment = Alignment(indent=indent, vertical='top', wrap_text=True)
+            desc_cell.font = italic
         ws.cell(row=rowidx, column=2, value=r['reference'])
         ws.cell(row=rowidx, column=3, value=r['unit'])
         ws.cell(row=rowidx, column=4, value=r['location'])
@@ -328,6 +472,8 @@ def build_period_workbook(year, month):
         for f, col in FIELD_TO_COL.items():
             cell = ws.cell(row=rowidx, column=col, value=round(r[f], 2))
             cell.number_format = money_format
+            if indent:
+                cell.font = italic
         apply_border(rowidx)
 
     def write_subtotal_row(rowidx, label, totals, label_font=bold_italic):
@@ -356,11 +502,35 @@ def build_period_workbook(year, month):
             cur_row += 1
 
             loc_totals = {f: 0.0 for f in SUM_FIELDS}
-            for r in grouped[category][location]:
-                write_data_row(cur_row, r)
+            for parent_id in grouped[category][location]:
+                parent_row = parent_lookup[parent_id]
+                additions = addition_buckets.get(parent_id, [])
+
+                # Parent row
+                write_data_row(cur_row, parent_row)
                 for f in SUM_FIELDS:
-                    loc_totals[f] += r[f]
+                    loc_totals[f] += parent_row[f]
                 cur_row += 1
+
+                # Addition sub-rows (indented)
+                for add_row in additions:
+                    write_data_row(cur_row, add_row, indent=2)
+                    for f in SUM_FIELDS:
+                        loc_totals[f] += add_row[f]
+                    cur_row += 1
+
+                # Parent subtotal — only when there are additions to sum
+                if additions:
+                    parent_subtotal = {
+                        f: parent_row[f] + sum(a[f] for a in additions) for f in SUM_FIELDS
+                    }
+                    write_subtotal_row(
+                        cur_row,
+                        f"Subtotal — {parent_row['description']}",
+                        parent_subtotal,
+                        italic,
+                    )
+                    cur_row += 1
 
             write_subtotal_row(cur_row, f'Subtotal — {location}', loc_totals, italic)
             for f in SUM_FIELDS:
@@ -526,7 +696,302 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                         
                 # Primary Button
                 ui.button('Save Record', on_click=save_asset).classes('w-full py-2 tracking-wide font-light bg-[#7F0019] text-white').props('unelevated')
-                
+
+            # ===== Card 2: ADD TO EXISTING ASSET =====
+            # Pull active parents (mirrors the disposal tab pattern)
+            def get_parent_assets():
+                try:
+                    return supabase.table('assets').select(
+                        'id, name, purchase_cost, depreciation_rate, '
+                        'category_id, location_id, '
+                        'categories(name), locations(name)'
+                    ).eq('status', 'Active').order('name').execute().data
+                except Exception:
+                    return []
+
+            add_parent_lookup = {}
+            def build_parent_options():
+                add_parent_lookup.clear()
+                opts = {}
+                for a in get_parent_assets():
+                    add_parent_lookup[a['id']] = a
+                    loc = a['locations']['name'] if a.get('locations') else 'No location'
+                    opts[a['id']] = f"{a['name']} ({loc})"
+                return opts
+
+            with ui.card().classes('w-full max-w-2xl bg-white border border-stone-200 shadow-none rounded-sm p-8 mx-auto mt-6'):
+                ui.label('Add to Existing Asset').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-6 w-full')
+
+                add_parent_select = ui.select(
+                    build_parent_options(),
+                    label='Select Parent Asset',
+                    with_input=True,
+                ).classes('w-full mb-4').props('outlined dense')
+
+                with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                    add_parent_cat = ui.input('Category', value='').classes('w-1/2').props('outlined dense readonly')
+                    add_parent_loc = ui.input('Location', value='').classes('w-1/2').props('outlined dense readonly')
+
+                with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                    add_parent_cost = ui.number('Parent Current Cost (RM)', value=0.0, format='%.2f').classes('w-full').props('outlined dense readonly')
+
+                add_desc = ui.input('Addition Description (e.g. "Air-cond upgrade")').classes('w-full mb-4').props('outlined dense')
+                add_remarks = ui.input('Remarks').classes('w-full mb-4').props('outlined dense')
+
+                def update_add_total_cost():
+                    try:
+                        q = float(add_qty.value) if add_qty.value else 0.0
+                        u = float(add_unit_cost.value) if add_unit_cost.value else 0.0
+                        add_cost_input.value = round(q * u, 2)
+                    except (ValueError, TypeError):
+                        pass
+
+                with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                    add_qty = ui.number('Qty', value=1, min=1, format='%d', on_change=update_add_total_cost).classes('w-1/4').props('outlined dense')
+                    add_unit_cost = ui.number('Unit Cost (RM)', value=0.0, format='%.2f', on_change=update_add_total_cost).classes('flex-1').props('outlined dense')
+                    add_cost_input = ui.number('Addition Cost (RM)', value=0.0, format='%.2f').classes('flex-1').props('outlined dense')
+
+                with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                    add_rate_select = ui.select(get_rate_options(), label='Depreciation Rate', with_input=True).classes('w-1/2').props('outlined dense')
+                    add_purchase_year = ui.number('Year of Purchase', value=date.today().year, format='%d').classes('w-1/2').props('outlined dense readonly')
+
+                def update_add_year_from_date():
+                    try:
+                        add_purchase_year.value = int(add_purchase_date.value[:4])
+                    except (ValueError, TypeError):
+                        pass
+
+                with ui.row().classes('w-full mb-4'):
+                    add_purchase_date = ui.input('Date of Purchase', value=str(date.today()), on_change=lambda: update_add_year_from_date()).classes('w-full').props('outlined dense')
+                    with add_purchase_date:
+                        with ui.menu().props('no-parent-event') as add_date_menu:
+                            with ui.date().bind_value(add_purchase_date) as _:
+                                with ui.row().classes('justify-end'):
+                                    ui.button('Close', on_click=add_date_menu.close).props('flat')
+                        with add_purchase_date.add_slot('append'):
+                            ui.icon('edit_calendar').on('click', add_date_menu.open).classes('cursor-pointer')
+
+                def on_parent_select():
+                    pid = add_parent_select.value
+                    if pid is None or pid not in add_parent_lookup:
+                        add_parent_cat.value = ''
+                        add_parent_loc.value = ''
+                        add_parent_cost.value = 0.0
+                        return
+                    p = add_parent_lookup[pid]
+                    add_parent_cat.value = p['categories']['name'] if p.get('categories') else ''
+                    add_parent_loc.value = p['locations']['name'] if p.get('locations') else ''
+                    add_parent_cost.value = float(p.get('purchase_cost') or 0.0)
+                    # Default the addition's depreciation rate to the parent's rate (editable)
+                    parent_rate = p.get('depreciation_rate')
+                    if parent_rate is not None and parent_rate in (add_rate_select.options or {}):
+                        add_rate_select.value = parent_rate
+
+                add_parent_select.on_value_change(lambda e: on_parent_select())
+
+                with ui.row().classes('w-full justify-end mb-4'):
+                    def refresh_add_options():
+                        add_parent_select.options = build_parent_options()
+                        add_parent_select.update()
+                        add_rate_select.options = get_rate_options()
+                        add_rate_select.update()
+                        ui.notify('Lists refreshed', type='info', position='top-right')
+                    ui.button('↻ Refresh', on_click=refresh_add_options).props('flat dense').classes('text-stone-400 text-xs tracking-wider')
+
+                def save_addition():
+                    pid = add_parent_select.value
+                    if pid is None or pid not in add_parent_lookup:
+                        ui.notify('Please select a parent asset.', type='warning', position='top')
+                        return
+                    if not add_desc.value or add_qty.value is None or add_unit_cost.value is None:
+                        ui.notify('Please fill in Description, Qty, and Unit Cost.', type='warning', position='top')
+                        return
+                    try:
+                        supabase.table('asset_additions').insert({
+                            'parent_asset_id': pid,
+                            'description': add_desc.value,
+                            'remarks': add_remarks.value,
+                            'quantity': int(add_qty.value) if add_qty.value else 1,
+                            'unit_cost': float(add_unit_cost.value) if add_unit_cost.value else 0.0,
+                            'addition_cost': float(add_cost_input.value) if add_cost_input.value else 0.0,
+                            'depreciation_rate': float(add_rate_select.value) if add_rate_select.value else 0.0,
+                            'purchase_date': add_purchase_date.value,
+                            'purchase_year': int(add_purchase_year.value) if add_purchase_year.value else None,
+                        }).execute()
+
+                        ui.notify('Addition recorded successfully', position='top', type='positive')
+
+                        # Clear form
+                        add_parent_select.value = None
+                        add_desc.value = ''
+                        add_remarks.value = ''
+                        add_qty.value = 1
+                        add_unit_cost.value = 0.0
+                        add_cost_input.value = 0.0
+                        add_rate_select.value = None
+                        add_parent_cat.value = ''
+                        add_parent_loc.value = ''
+                        add_parent_cost.value = 0.0
+                        add_purchase_date.value = str(date.today())
+                        add_purchase_year.value = date.today().year
+
+                        # Refresh list + Reports
+                        try:
+                            load_additions()
+                        except Exception:
+                            pass
+                        try:
+                            refresh_reports()
+                        except Exception:
+                            pass
+
+                    except Exception as e:
+                        ui.notify(f'Database error: {e}', type='negative')
+
+                ui.button('Save Addition', on_click=save_addition).classes('w-full py-2 tracking-wide font-light bg-[#7F0019] text-white').props('unelevated')
+
+            # ===== Card 3: ADDITIONS LIST =====
+            with ui.card().classes('w-full max-w-2xl bg-white border border-stone-200 shadow-none rounded-sm p-8 mx-auto mt-6'):
+                ui.label('Recorded Additions').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-6 w-full')
+
+                add_cols = [
+                    {'name': 'parent_name', 'label': 'Parent Asset', 'field': 'parent_name', 'align': 'left', 'sortable': True},
+                    {'name': 'description', 'label': 'Description', 'field': 'description', 'align': 'left', 'sortable': True},
+                    {'name': 'quantity', 'label': 'Qty', 'field': 'quantity', 'align': 'center'},
+                    {'name': 'addition_cost_fmt', 'label': 'Addition Cost', 'field': 'addition_cost_fmt', 'align': 'right', 'sortable': True},
+                    {'name': 'depreciation_rate', 'label': 'Rate (%)', 'field': 'depreciation_rate', 'align': 'center'},
+                    {'name': 'purchase_date', 'label': 'Date', 'field': 'purchase_date', 'align': 'center', 'sortable': True},
+                    {'name': 'actions', 'label': 'Actions', 'field': 'actions', 'align': 'center'},
+                ]
+                additions_table = ui.table(columns=add_cols, rows=[], row_key='id', pagination=10).classes('w-full text-stone-800').props('flat bordered dense')
+                additions_table.add_slot('body-cell-actions', '''
+                    <q-td :props="props">
+                        <q-btn flat dense icon="edit" color="primary" @click="() => $parent.$emit('edit', props.row)" />
+                        <q-btn flat dense icon="delete" color="negative" @click="() => $parent.$emit('delete', props.row)" />
+                    </q-td>
+                ''')
+
+                def load_additions():
+                    try:
+                        rows_raw = supabase.table('asset_additions').select(
+                            '*, assets(name)'
+                        ).order('id', desc=True).execute().data
+                        rendered = []
+                        for r in rows_raw:
+                            rendered.append({
+                                'id': r['id'],
+                                'parent_asset_id': r.get('parent_asset_id'),
+                                'parent_name': (r.get('assets') or {}).get('name') or '—',
+                                'description': r.get('description') or '',
+                                'remarks': r.get('remarks') or '',
+                                'quantity': r.get('quantity') or 0,
+                                'unit_cost': float(r.get('unit_cost') or 0),
+                                'addition_cost': float(r.get('addition_cost') or 0),
+                                'addition_cost_fmt': f"RM {float(r.get('addition_cost') or 0):,.2f}",
+                                'depreciation_rate': r.get('depreciation_rate') or 0,
+                                'purchase_date': r.get('purchase_date') or '',
+                                'purchase_year': r.get('purchase_year'),
+                            })
+                        additions_table.rows = rendered
+                        additions_table.update()
+                    except Exception as e:
+                        ui.notify(f'Could not load additions: {e}', type='negative')
+
+                def edit_addition(row):
+                    parent_opts = build_parent_options()
+                    rate_opts = get_rate_options()
+                    with ui.dialog() as d, ui.card().classes('w-full max-w-2xl bg-white border border-stone-200 shadow-none rounded-sm p-8 mx-auto'):
+                        ui.label(f"Edit Addition: {row.get('description', '')}").classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-6 w-full')
+
+                        e_parent = ui.select(parent_opts, label='Parent Asset', value=row.get('parent_asset_id') if row.get('parent_asset_id') in parent_opts else None, with_input=True).classes('w-full mb-4').props('outlined dense')
+                        e_desc = ui.input('Description', value=row.get('description', '')).classes('w-full mb-4').props('outlined dense')
+                        e_remarks = ui.input('Remarks', value=row.get('remarks', '')).classes('w-full mb-4').props('outlined dense')
+
+                        def update_e_total():
+                            try:
+                                q = float(e_qty.value) if e_qty.value else 0.0
+                                u = float(e_unit.value) if e_unit.value else 0.0
+                                e_total.value = round(q * u, 2)
+                            except (ValueError, TypeError):
+                                pass
+
+                        with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                            e_qty = ui.number('Qty', value=row.get('quantity', 1), min=1, format='%d', on_change=update_e_total).classes('w-1/4').props('outlined dense')
+                            e_unit = ui.number('Unit Cost (RM)', value=row.get('unit_cost', 0.0), format='%.2f', on_change=update_e_total).classes('flex-1').props('outlined dense')
+                            e_total = ui.number('Addition Cost (RM)', value=row.get('addition_cost', 0.0), format='%.2f').classes('flex-1').props('outlined dense')
+
+                        rate_val = row.get('depreciation_rate', 0.0)
+                        with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                            e_rate = ui.select(rate_opts, label='Depreciation Rate', value=rate_val if rate_val in rate_opts else None, with_input=True).classes('w-1/2').props('outlined dense')
+                            e_year = ui.number('Year of Purchase', value=row.get('purchase_year') or date.today().year, format='%d').classes('w-1/2').props('outlined dense readonly')
+
+                        def update_e_year_from_date():
+                            try:
+                                e_year.value = int(e_date.value[:4])
+                            except (ValueError, TypeError):
+                                pass
+
+                        with ui.row().classes('w-full mb-4'):
+                            e_date = ui.input('Date of Purchase', value=row.get('purchase_date') or str(date.today()), on_change=lambda: update_e_year_from_date()).classes('w-full').props('outlined dense')
+                            with e_date:
+                                with ui.menu().props('no-parent-event') as e_menu:
+                                    with ui.date().bind_value(e_date) as _:
+                                        with ui.row().classes('justify-end'):
+                                            ui.button('Close', on_click=e_menu.close).props('flat')
+                                with e_date.add_slot('append'):
+                                    ui.icon('edit_calendar').on('click', e_menu.open).classes('cursor-pointer')
+
+                        def save_edit():
+                            try:
+                                supabase.table('asset_additions').update({
+                                    'parent_asset_id': e_parent.value,
+                                    'description': e_desc.value,
+                                    'remarks': e_remarks.value,
+                                    'quantity': int(e_qty.value) if e_qty.value else 1,
+                                    'unit_cost': float(e_unit.value) if e_unit.value else 0.0,
+                                    'addition_cost': float(e_total.value) if e_total.value else 0.0,
+                                    'depreciation_rate': float(e_rate.value) if e_rate.value else 0.0,
+                                    'purchase_date': e_date.value,
+                                    'purchase_year': int(e_year.value) if e_year.value else None,
+                                }).eq('id', row['id']).execute()
+                                ui.notify('Addition updated', type='positive', position='top')
+                                load_additions()
+                                try:
+                                    refresh_reports()
+                                except Exception:
+                                    pass
+                                d.close()
+                            except Exception as ex:
+                                ui.notify(f'Database error: {ex}', type='negative')
+
+                        ui.button('Update Addition', on_click=save_edit).classes('w-full py-2 tracking-wide font-light bg-[#7F0019] text-white').props('unelevated')
+                    d.open()
+
+                def delete_addition(row):
+                    with ui.dialog() as confirm_dlg, ui.card().classes('p-6 bg-white border border-stone-200 shadow-none rounded-sm'):
+                        ui.label('Confirm Deletion').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-4 w-full')
+                        ui.label(f"Delete addition \"{row.get('description', '')}\" from {row.get('parent_name', '')}?").classes('text-stone-600 mb-6')
+                        with ui.row().classes('w-full gap-4 justify-end'):
+                            ui.button('Cancel', on_click=confirm_dlg.close).props('flat').classes('text-stone-500')
+                            def do_delete():
+                                try:
+                                    supabase.table('asset_additions').delete().eq('id', row['id']).execute()
+                                    ui.notify('Addition deleted', type='warning', position='top')
+                                    load_additions()
+                                    try:
+                                        refresh_reports()
+                                    except Exception:
+                                        pass
+                                    confirm_dlg.close()
+                                except Exception as ex:
+                                    ui.notify(f'Delete error: {ex}', type='negative')
+                            ui.button('Delete', on_click=do_delete).classes('bg-red-700 text-white').props('unelevated')
+                    confirm_dlg.open()
+
+                additions_table.on('edit', lambda msg: edit_addition(msg.args))
+                additions_table.on('delete', lambda msg: delete_addition(msg.args))
+                load_additions()
+
         # --- TAB: DISPOSAL ---
         with ui.tab_panel(tab_disposal):
 
