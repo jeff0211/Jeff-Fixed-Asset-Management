@@ -242,6 +242,7 @@ def _build_addition_row(add, parent_a, year, month, parent_disp_y, parent_disp_m
         'acc_dep_cf': acc_dep_cf,
         'nbv_current': nbv_current,
         'nbv_prior': nbv_prior,
+        'remarks': add.get('remarks') or '',
         '_is_addition': True,
         '_parent_id': add.get('parent_asset_id'),
     }
@@ -252,7 +253,7 @@ def compute_period_rows(year, month):
     assets = supabase.table('assets').select(
         'id, name, quantity, unit_cost, purchase_cost, depreciation_rate, '
         'purchase_year, purchase_date, status, category_id, location_id, '
-        'categories(name), locations(name)'
+        'remarks, categories(name), locations(name)'
     ).execute().data
     disposals = supabase.table('disposals').select('*').execute().data
     try:
@@ -355,6 +356,7 @@ def compute_period_rows(year, month):
             'acc_dep_cf': acc_dep_cf,
             'nbv_current': nbv_current,
             'nbv_prior': nbv_prior,
+            'remarks': a.get('remarks') or '',
             '_is_addition': False,
             '_parent_id': a['id'],
         })
@@ -395,7 +397,7 @@ def build_period_workbook(year, month):
     money_format = '#,##0.00;-#,##0.00;-'
     rate_format = '0.0%'
 
-    LAST_COL = 21  # column U
+    LAST_COL = 22  # column V (last is REMARKS)
 
     def apply_border(rowidx, full=False, start_col=1, end_col=LAST_COL):
         b = border_full if full else border_vertical
@@ -413,6 +415,7 @@ def build_period_workbook(year, month):
         ('G5', 'COST'),
         ('M5', 'ACCUMULATED DEPRECIATION'),
         ('T5', 'NET BOOK VALUE'),
+        ('V5', 'REMARKS'),
     ]
     headers_sub = [
         ('G6', f'B/F AS AT\n{bf_str}\nRM'),
@@ -442,6 +445,7 @@ def build_period_workbook(year, month):
     ws.merge_cells('G5:L5')
     ws.merge_cells('M5:S5')
     ws.merge_cells('T5:U5')
+    ws.merge_cells('V5:V6')
     # Description..Year Of Purchase span both header rows
     for col in 'ABCDEF':
         ws.merge_cells(f'{col}5:{col}6')
@@ -491,6 +495,13 @@ def build_period_workbook(year, month):
             cell.number_format = money_format
             if indent:
                 cell.font = italic
+        # Remarks (last column V = 22)
+        rem_cell = ws.cell(row=rowidx, column=22, value=r.get('remarks', ''))
+        rem_cell.alignment = Alignment(
+            indent=indent, vertical='top', wrap_text=True, horizontal='left'
+        )
+        if indent:
+            rem_cell.font = italic
         apply_border(rowidx)
 
     def write_subtotal_row(rowidx, label, totals, label_font=bold_italic):
@@ -571,7 +582,7 @@ def build_period_workbook(year, month):
     widths = {'A': 50, 'B': 12, 'C': 6, 'D': 22, 'E': 10, 'F': 8,
               'G': 14, 'H': 12, 'I': 12, 'J': 12, 'K': 14, 'L': 14,
               'M': 14, 'N': 12, 'O': 12, 'P': 14, 'Q': 14, 'R': 14, 'S': 14,
-              'T': 14, 'U': 14}
+              'T': 14, 'U': 14, 'V': 36}
     for col, w in widths.items():
         ws.column_dimensions[col].width = w
 
@@ -646,8 +657,7 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                 
                 # Top Row: Text Inputs
                 name = ui.input('Asset Description').classes('w-full mb-4').props('outlined dense')
-                remarks = ui.input('Remarks').classes('w-full mb-4').props('outlined dense')
-                
+
                 # Middle Row: Foreign Key Dropdowns (Categories & Locations)
                 with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
                     cat_select = ui.select(get_cat_options(), label='Category').classes('w-1/2').props('outlined dense')
@@ -683,6 +693,9 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                         rate_select.update()
                         ui.notify('Dropdowns synced with master data', type='info', position='top-right')
                     ui.button('↻ Sync Options', on_click=refresh_dropdowns).props('flat dense').classes('text-stone-400 text-xs tracking-wider')
+
+                # Remarks — last field before save
+                remarks = ui.input('Remarks').classes('w-full mb-4').props('outlined dense')
 
                 # The Save Logic
                 def save_asset():
@@ -772,7 +785,6 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                     add_parent_cost = ui.number('Parent Current Cost (RM)', value=0.0, format='%.2f').classes('w-full').props('outlined dense readonly')
 
                 add_desc = ui.input('Addition Description (e.g. "Air-cond upgrade")').classes('w-full mb-4').props('outlined dense')
-                add_remarks = ui.input('Remarks').classes('w-full mb-4').props('outlined dense')
 
                 def update_add_total_cost():
                     try:
@@ -833,6 +845,9 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                         add_rate_select.update()
                         ui.notify('Lists refreshed', type='info', position='top-right')
                     ui.button('↻ Refresh', on_click=refresh_add_options).props('flat dense').classes('text-stone-400 text-xs tracking-wider')
+
+                # Remarks — last field before save
+                add_remarks = ui.input('Remarks').classes('w-full mb-4').props('outlined dense')
 
                 def save_addition():
                     pid = add_parent_select.value
@@ -1180,6 +1195,7 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                     str(a.get('purchase_date') or ''),
                     f"{float(a.get('depreciation_rate') or 0)}",
                     f"qty {a.get('quantity') or 0}",
+                    str(a.get('remarks') or ''),
                 ]
                 return ' '.join(p for p in parts if p).lower()
 
@@ -1271,7 +1287,6 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
 
                     e_parent = ui.select(parent_opts, label='Parent Asset', value=row.get('parent_asset_id') if row.get('parent_asset_id') in parent_opts else None, with_input=True).classes('w-full mb-4').props('outlined dense')
                     e_desc = ui.input('Description', value=row.get('description', '')).classes('w-full mb-4').props('outlined dense')
-                    e_remarks = ui.input('Remarks', value=row.get('remarks', '')).classes('w-full mb-4').props('outlined dense')
 
                     def update_e_total():
                         try:
@@ -1306,6 +1321,9 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                                         ui.button('Close', on_click=e_menu.close).props('flat')
                             with e_date.add_slot('append'):
                                 ui.icon('edit_calendar').on('click', e_menu.open).classes('cursor-pointer')
+
+                    # Remarks — last field before save
+                    e_remarks = ui.input('Remarks', value=row.get('remarks', '')).classes('w-full mb-4').props('outlined dense')
 
                     def save_edit():
                         try:
@@ -1374,7 +1392,6 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
 
                         # Top Row: Text Inputs
                         e_name = ui.input('Asset Description', value=row.get('name', '')).classes('w-full mb-4').props('outlined dense')
-                        e_remarks = ui.input('Remarks', value=row.get('remarks', '')).classes('w-full mb-4').props('outlined dense')
 
                         # Middle Row: Foreign Key Dropdowns (Categories & Locations)
                         with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
@@ -1441,6 +1458,9 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                                 except Exception:
                                     ui.notify('Failed to sync dropdowns', type='warning')
                             ui.button('↻ Sync Options', on_click=refresh_edit_dropdowns).props('flat dense').classes('text-stone-400 text-xs tracking-wider')
+
+                        # Remarks — last field before save
+                        e_remarks = ui.input('Remarks', value=row.get('remarks', '')).classes('w-full mb-4').props('outlined dense')
 
                         # The Update Logic
                         def save_changes():
