@@ -1,4 +1,4 @@
-from nicegui import ui
+from nicegui import ui, app
 from supabase import create_client, Client
 import os
 import csv
@@ -23,7 +23,12 @@ url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(url, key)
 
-ui.page_title('Asset Register')
+ui.page_title('Mega Jutamas — Fixed Asset Register')
+
+# Register the brand mark SVG as a real static route (NiceGUI's favicon arg
+# only maps /favicon.ico — we want the same file usable inside the page too).
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app.add_static_file(url_path='/logo.svg', local_file=os.path.join(_BASE_DIR, 'favicon.svg'))
 
 # --- MUJI THEME ENGINE ---
 # 1. Override the default vibrant colors with muted Muji tones
@@ -34,7 +39,19 @@ ui.colors(
     positive='#4A6741',   # Muted earthy green
 )
 
-# 2. Force the entire app background to a warm, unbleached paper color
+# 2. Typography: serif for headings, refined sans for body — keeps the Muji
+#    "considered, calm" feel while giving the title proper weight.
+ui.add_head_html('''
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .font-serif-display { font-family: 'Cormorant Garamond', Georgia, serif; }
+</style>
+''')
+
+# 3. Force the entire app background to a warm, unbleached paper color
 ui.query('body').classes('bg-[#FAF9F6] text-[#333333]')
 
 # --- DATA FUNCTIONS ---
@@ -565,13 +582,20 @@ def build_period_workbook(year, month):
 
 # --- UI LAYOUT ---
 
-# Header: Crisp white background, thin border, zero shadow
-with ui.header().classes('bg-[#8b6854] border-b border-stone-200 text-white items-center justify-between px-8 py-3 shadow-none'):
-    # A simple, elegant title
-    ui.label('Fixed Assets Module Demo').classes('text-xl tracking-wide font-light')
-    
-    # "Flat" button style for logout to keep it minimal
-    ui.button('Sign Out', color='accent').props('flat').classes('text-sm tracking-wider font-light text-white')
+# Header: taupe brown band (kept by request), refined typography & generic brand mark.
+with ui.header().classes('bg-[#8b6854] text-white items-center justify-between px-8 py-4 shadow-none'):
+    # Brand block: ledger mark (same SVG as favicon) + serif title.
+    with ui.row().classes('items-center gap-4'):
+        ui.image('/logo.svg').classes('w-9 h-9 bg-transparent').style('background: transparent; box-shadow: none;')
+        ui.label('Fixed Asset Register') \
+            .classes('font-serif-display text-2xl text-white leading-none') \
+            .style('letter-spacing: 0.5px; font-weight: 600;')
+
+    # Sign-out: outlined boxed button with logout icon — sits cleanly on the brown header.
+    ui.button('Sign Out', icon='logout') \
+        .props('outline no-caps rounded') \
+        .classes('text-white border border-white/40 hover:bg-white/10 px-4 py-1.5 text-sm tracking-wide') \
+        .style('font-weight: 500;')
 
 # Main Container: Center the content and restrict the width so it doesn't stretch too far on wide monitors
 with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
@@ -612,7 +636,13 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
 
             # Form Card: Pure white, thin border, sharp corners
             with ui.card().classes('w-full max-w-2xl bg-white border border-stone-200 shadow-none rounded-sm p-8 mx-auto'):
-                ui.label('New Asset Details').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-6 w-full')
+                ui.label('New Asset Details').classes(
+                    'block text-lg tracking-wide text-stone-800 font-medium '
+                    'bg-[#EDE6DA] border-b border-stone-300 '
+                    'mb-6 px-8 py-4 border-l-4 border-l-[#7F0019]'
+                ).style(
+                    'width: calc(100% + 4rem); margin-left: -2rem; margin-top: -2rem;'
+                )
                 
                 # Top Row: Text Inputs
                 name = ui.input('Asset Description').classes('w-full mb-4').props('outlined dense')
@@ -720,7 +750,13 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                 return opts
 
             with ui.card().classes('w-full max-w-2xl bg-white border border-stone-200 shadow-none rounded-sm p-8 mx-auto mt-6'):
-                ui.label('Add to Existing Asset').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-6 w-full')
+                ui.label('Add to Existing Asset').classes(
+                    'block text-lg tracking-wide text-stone-800 font-medium '
+                    'bg-[#EDE6DA] border-b border-stone-300 '
+                    'mb-6 px-8 py-4 border-l-4 border-l-[#7F0019]'
+                ).style(
+                    'width: calc(100% + 4rem); margin-left: -2rem; margin-top: -2rem;'
+                )
 
                 add_parent_select = ui.select(
                     build_parent_options(),
@@ -849,148 +885,6 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                         ui.notify(f'Database error: {e}', type='negative')
 
                 ui.button('Save Addition', on_click=save_addition).classes('w-full py-2 tracking-wide font-light bg-[#7F0019] text-white').props('unelevated')
-
-            # ===== Card 3: ADDITIONS LIST =====
-            with ui.card().classes('w-full max-w-2xl bg-white border border-stone-200 shadow-none rounded-sm p-8 mx-auto mt-6'):
-                ui.label('Recorded Additions').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-6 w-full')
-
-                add_cols = [
-                    {'name': 'parent_name', 'label': 'Parent Asset', 'field': 'parent_name', 'align': 'left', 'sortable': True},
-                    {'name': 'description', 'label': 'Description', 'field': 'description', 'align': 'left', 'sortable': True},
-                    {'name': 'quantity', 'label': 'Qty', 'field': 'quantity', 'align': 'center'},
-                    {'name': 'addition_cost_fmt', 'label': 'Addition Cost', 'field': 'addition_cost_fmt', 'align': 'right', 'sortable': True},
-                    {'name': 'depreciation_rate', 'label': 'Rate (%)', 'field': 'depreciation_rate', 'align': 'center'},
-                    {'name': 'purchase_date', 'label': 'Date', 'field': 'purchase_date', 'align': 'center', 'sortable': True},
-                    {'name': 'actions', 'label': 'Actions', 'field': 'actions', 'align': 'center'},
-                ]
-                additions_table = ui.table(columns=add_cols, rows=[], row_key='id', pagination=10).classes('w-full text-stone-800').props('flat bordered dense')
-                additions_table.add_slot('body-cell-actions', '''
-                    <q-td :props="props">
-                        <q-btn flat dense icon="edit" color="primary" @click="() => $parent.$emit('edit', props.row)" />
-                        <q-btn flat dense icon="delete" color="negative" @click="() => $parent.$emit('delete', props.row)" />
-                    </q-td>
-                ''')
-
-                def load_additions():
-                    try:
-                        rows_raw = supabase.table('asset_additions').select(
-                            '*, assets(name)'
-                        ).order('id', desc=True).execute().data
-                        rendered = []
-                        for r in rows_raw:
-                            rendered.append({
-                                'id': r['id'],
-                                'parent_asset_id': r.get('parent_asset_id'),
-                                'parent_name': (r.get('assets') or {}).get('name') or '—',
-                                'description': r.get('description') or '',
-                                'remarks': r.get('remarks') or '',
-                                'quantity': r.get('quantity') or 0,
-                                'unit_cost': float(r.get('unit_cost') or 0),
-                                'addition_cost': float(r.get('addition_cost') or 0),
-                                'addition_cost_fmt': f"RM {float(r.get('addition_cost') or 0):,.2f}",
-                                'depreciation_rate': r.get('depreciation_rate') or 0,
-                                'purchase_date': r.get('purchase_date') or '',
-                                'purchase_year': r.get('purchase_year'),
-                            })
-                        additions_table.rows = rendered
-                        additions_table.update()
-                    except Exception as e:
-                        ui.notify(f'Could not load additions: {e}', type='negative')
-
-                def edit_addition(row):
-                    parent_opts = build_parent_options()
-                    rate_opts = get_rate_options()
-                    with ui.dialog() as d, ui.card().classes('w-full max-w-2xl bg-white border border-stone-200 shadow-none rounded-sm p-8 mx-auto'):
-                        ui.label(f"Edit Addition: {row.get('description', '')}").classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-6 w-full')
-
-                        e_parent = ui.select(parent_opts, label='Parent Asset', value=row.get('parent_asset_id') if row.get('parent_asset_id') in parent_opts else None, with_input=True).classes('w-full mb-4').props('outlined dense')
-                        e_desc = ui.input('Description', value=row.get('description', '')).classes('w-full mb-4').props('outlined dense')
-                        e_remarks = ui.input('Remarks', value=row.get('remarks', '')).classes('w-full mb-4').props('outlined dense')
-
-                        def update_e_total():
-                            try:
-                                q = float(e_qty.value) if e_qty.value else 0.0
-                                u = float(e_unit.value) if e_unit.value else 0.0
-                                e_total.value = round(q * u, 2)
-                            except (ValueError, TypeError):
-                                pass
-
-                        with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
-                            e_qty = ui.number('Qty', value=row.get('quantity', 1), min=1, format='%d', on_change=update_e_total).classes('w-1/4').props('outlined dense')
-                            e_unit = ui.number('Unit Cost (RM)', value=row.get('unit_cost', 0.0), format='%.2f', on_change=update_e_total).classes('flex-1').props('outlined dense')
-                            e_total = ui.number('Addition Cost (RM)', value=row.get('addition_cost', 0.0), format='%.2f').classes('flex-1').props('outlined dense')
-
-                        rate_val = row.get('depreciation_rate', 0.0)
-                        with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
-                            e_rate = ui.select(rate_opts, label='Depreciation Rate', value=rate_val if rate_val in rate_opts else None, with_input=True).classes('w-1/2').props('outlined dense')
-                            e_year = ui.number('Year of Purchase', value=row.get('purchase_year') or date.today().year, format='%d').classes('w-1/2').props('outlined dense readonly')
-
-                        def update_e_year_from_date():
-                            try:
-                                e_year.value = int(e_date.value[:4])
-                            except (ValueError, TypeError):
-                                pass
-
-                        with ui.row().classes('w-full mb-4'):
-                            e_date = ui.input('Date of Purchase', value=row.get('purchase_date') or str(date.today()), on_change=lambda: update_e_year_from_date()).classes('w-full').props('outlined dense')
-                            with e_date:
-                                with ui.menu().props('no-parent-event') as e_menu:
-                                    with ui.date().bind_value(e_date) as _:
-                                        with ui.row().classes('justify-end'):
-                                            ui.button('Close', on_click=e_menu.close).props('flat')
-                                with e_date.add_slot('append'):
-                                    ui.icon('edit_calendar').on('click', e_menu.open).classes('cursor-pointer')
-
-                        def save_edit():
-                            try:
-                                supabase.table('asset_additions').update({
-                                    'parent_asset_id': e_parent.value,
-                                    'description': e_desc.value,
-                                    'remarks': e_remarks.value,
-                                    'quantity': int(e_qty.value) if e_qty.value else 1,
-                                    'unit_cost': float(e_unit.value) if e_unit.value else 0.0,
-                                    'addition_cost': float(e_total.value) if e_total.value else 0.0,
-                                    'depreciation_rate': float(e_rate.value) if e_rate.value else 0.0,
-                                    'purchase_date': e_date.value,
-                                    'purchase_year': int(e_year.value) if e_year.value else None,
-                                }).eq('id', row['id']).execute()
-                                ui.notify('Addition updated', type='positive', position='top')
-                                load_additions()
-                                try:
-                                    refresh_reports()
-                                except Exception:
-                                    pass
-                                d.close()
-                            except Exception as ex:
-                                ui.notify(f'Database error: {ex}', type='negative')
-
-                        ui.button('Update Addition', on_click=save_edit).classes('w-full py-2 tracking-wide font-light bg-[#7F0019] text-white').props('unelevated')
-                    d.open()
-
-                def delete_addition(row):
-                    with ui.dialog() as confirm_dlg, ui.card().classes('p-6 bg-white border border-stone-200 shadow-none rounded-sm'):
-                        ui.label('Confirm Deletion').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-4 w-full')
-                        ui.label(f"Delete addition \"{row.get('description', '')}\" from {row.get('parent_name', '')}?").classes('text-stone-600 mb-6')
-                        with ui.row().classes('w-full gap-4 justify-end'):
-                            ui.button('Cancel', on_click=confirm_dlg.close).props('flat').classes('text-stone-500')
-                            def do_delete():
-                                try:
-                                    supabase.table('asset_additions').delete().eq('id', row['id']).execute()
-                                    ui.notify('Addition deleted', type='warning', position='top')
-                                    load_additions()
-                                    try:
-                                        refresh_reports()
-                                    except Exception:
-                                        pass
-                                    confirm_dlg.close()
-                                except Exception as ex:
-                                    ui.notify(f'Delete error: {ex}', type='negative')
-                            ui.button('Delete', on_click=do_delete).classes('bg-red-700 text-white').props('unelevated')
-                    confirm_dlg.open()
-
-                additions_table.on('edit', lambda msg: edit_addition(msg.args))
-                additions_table.on('delete', lambda msg: delete_addition(msg.args))
-                load_additions()
 
         # --- TAB: DISPOSAL ---
         with ui.tab_panel(tab_disposal):
@@ -1216,35 +1110,247 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                     ui.button('Generate Report', icon='description', on_click=export_period) \
                         .classes('text-sm tracking-wide bg-[#7F0019] text-white').props('unelevated')
 
-            # Search Row: Muji-style search bar
-            with ui.row().classes('w-full mb-4 px-2'):
-                search_input = ui.input(placeholder='Search assets by name, category, or status...').classes('w-full').props('outlined dense clearable')
-                search_input.on('input', lambda: asset_table.update()) # Force table update on search
+            # ============ SECTION 1: MAIN ASSETS ============
+            with ui.card().classes('w-full bg-white border border-stone-200 shadow-none rounded-sm p-6 mt-2'):
+                with ui.row().classes('w-full items-center mb-4'):
+                    ui.element('div').classes('w-1 h-5 bg-[#7F0019] mr-3')
+                    ui.label('Main Assets').classes('font-serif-display text-xl text-stone-800').style('font-weight: 600; letter-spacing: 0.3px;')
 
-            # The Table: .props('flat bordered') removes the shadow and adds a crisp line
-            columns = [
-                {'name': 'name', 'label': 'Description', 'field': 'name', 'align': 'left', 'sortable': True},
-                {'name': 'category', 'label': 'Category', 'field': 'category', 'align': 'left', 'sortable': True},
-                {'name': 'location', 'label': 'Location', 'field': 'location', 'align': 'left', 'sortable': True},
-                {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'center', 'sortable': True},
-                {'name': 'price', 'label': 'Purchase Cost', 'field': 'price', 'align': 'right', 'sortable': True},
-                {'name': 'actions', 'label': 'Actions', 'field': 'actions', 'align': 'center'},
-            ]
-            
-            asset_data = get_assets()
-            asset_table = ui.table(columns=columns, rows=asset_data, row_key='id', pagination=10).classes('w-full text-stone-800').props('flat bordered')
-            asset_table.bind_filter_from(search_input, 'value')
+                with ui.row().classes('w-full mb-4'):
+                    search_input = ui.input(
+                        placeholder='Search by name, category, location, status, year, cost (e.g. 1000)…'
+                    ).classes('w-full').props('outlined dense clearable debounce=0')
 
-            # --- EDIT LOGIC ---
-            asset_table.add_slot('body-cell-actions', '''
-                <q-td :props="props">
-                    <q-btn flat dense icon="edit" color="primary" @click="() => $parent.$emit('edit', props.row)" />
-                </q-td>
-            ''')
+                columns = [
+                    {'name': 'name', 'label': 'Description', 'field': 'name', 'align': 'left', 'sortable': True},
+                    {'name': 'category', 'label': 'Category', 'field': 'category', 'align': 'left', 'sortable': True},
+                    {'name': 'location', 'label': 'Location', 'field': 'location', 'align': 'left', 'sortable': True},
+                    {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'center', 'sortable': True},
+                    {'name': 'price', 'label': 'Purchase Cost', 'field': 'price', 'align': 'right', 'sortable': True},
+                    {'name': 'actions', 'label': 'Actions', 'field': 'actions', 'align': 'center'},
+                ]
+                asset_table = ui.table(columns=columns, rows=[], row_key='id', pagination=10).classes('w-full text-stone-800').props('flat bordered')
+                asset_table.add_slot('body-cell-actions', '''
+                    <q-td :props="props">
+                        <q-btn flat dense icon="edit" color="primary" @click="() => $parent.$emit('edit', props.row)" />
+                    </q-td>
+                ''')
+
+            # ============ SECTION 2: ADDITIONAL ASSETS ============
+            with ui.card().classes('w-full bg-white border border-stone-200 shadow-none rounded-sm p-6 mt-6'):
+                with ui.row().classes('w-full items-center mb-4'):
+                    ui.element('div').classes('w-1 h-5 bg-[#7F0019] mr-3')
+                    ui.label('Additional Assets').classes('font-serif-display text-xl text-stone-800').style('font-weight: 600; letter-spacing: 0.3px;')
+
+                with ui.row().classes('w-full mb-4'):
+                    add_search_input = ui.input(
+                        placeholder='Search by parent, description, year, cost…'
+                    ).classes('w-full').props('outlined dense clearable debounce=0')
+
+                add_cols = [
+                    {'name': 'parent_name', 'label': 'Parent Asset', 'field': 'parent_name', 'align': 'left', 'sortable': True},
+                    {'name': 'description', 'label': 'Addition', 'field': 'description', 'align': 'left', 'sortable': True},
+                    {'name': 'quantity', 'label': 'Qty', 'field': 'quantity', 'align': 'center'},
+                    {'name': 'addition_cost_fmt', 'label': 'Addition Cost', 'field': 'addition_cost_fmt', 'align': 'right', 'sortable': True},
+                    {'name': 'depreciation_rate', 'label': 'Rate (%)', 'field': 'depreciation_rate', 'align': 'center'},
+                    {'name': 'purchase_date', 'label': 'Date', 'field': 'purchase_date', 'align': 'center', 'sortable': True},
+                    {'name': 'actions', 'label': 'Actions', 'field': 'actions', 'align': 'center'},
+                ]
+                additions_table = ui.table(columns=add_cols, rows=[], row_key='id', pagination=10).classes('w-full text-stone-800').props('flat bordered')
+                additions_table.add_slot('body-cell-actions', '''
+                    <q-td :props="props">
+                        <q-btn flat dense icon="edit" color="primary" @click="() => $parent.$emit('edit', props.row)" />
+                        <q-btn flat dense icon="delete" color="negative" @click="() => $parent.$emit('delete', props.row)" />
+                    </q-td>
+                ''')
+
+            # ============ Search caches + filter handlers ============
+            main_assets_cache = []
+            additions_cache = []
+
+            def _asset_search_blob(a):
+                parts = [
+                    str(a.get('name') or ''),
+                    str(a.get('category') or ''),
+                    str(a.get('location') or ''),
+                    str(a.get('status') or ''),
+                    str(a.get('price') or ''),                       # "RM 1,234.00"
+                    f"{float(a.get('price_raw') or 0):.2f}",         # "1234.00"
+                    str(a.get('purchase_year') or ''),
+                    str(a.get('purchase_date') or ''),
+                    f"{float(a.get('depreciation_rate') or 0)}",
+                    f"qty {a.get('quantity') or 0}",
+                ]
+                return ' '.join(p for p in parts if p).lower()
+
+            def _addition_search_blob(r):
+                parts = [
+                    str(r.get('parent_name') or ''),
+                    str(r.get('description') or ''),
+                    str(r.get('remarks') or ''),
+                    str(r.get('addition_cost_fmt') or ''),
+                    f"{float(r.get('addition_cost') or 0):.2f}",
+                    f"{float(r.get('unit_cost') or 0):.2f}",
+                    str(r.get('purchase_year') or ''),
+                    str(r.get('purchase_date') or ''),
+                    f"{float(r.get('depreciation_rate') or 0)}",
+                    f"qty {r.get('quantity') or 0}",
+                ]
+                return ' '.join(p for p in parts if p).lower()
+
+            def _filter_rows(cache, term):
+                term = (term or '').lower().strip()
+                if not term:
+                    return list(cache)
+                words = [w for w in term.split() if w]
+                return [r for r in cache if all(w in r.get('_search', '') for w in words)]
+
+            def apply_main_filter():
+                asset_table.rows = _filter_rows(main_assets_cache, search_input.value)
+                asset_table.update()
+
+            def apply_additions_filter():
+                additions_table.rows = _filter_rows(additions_cache, add_search_input.value)
+                additions_table.update()
+
+            search_input.on('update:model-value', lambda e: apply_main_filter())
+            search_input.on('clear', lambda e: apply_main_filter())
+            add_search_input.on('update:model-value', lambda e: apply_additions_filter())
+            add_search_input.on('clear', lambda e: apply_additions_filter())
+
+            # ============ Shared refresh + edit/delete handlers ============
+            def load_additions():
+                try:
+                    rows_raw = supabase.table('asset_additions').select(
+                        '*, assets(name)'
+                    ).order('id', desc=True).execute().data
+                    rendered = []
+                    for r in rows_raw:
+                        item = {
+                            'id': r['id'],
+                            'parent_asset_id': r.get('parent_asset_id'),
+                            'parent_name': (r.get('assets') or {}).get('name') or '—',
+                            'description': r.get('description') or '',
+                            'remarks': r.get('remarks') or '',
+                            'quantity': r.get('quantity') or 0,
+                            'unit_cost': float(r.get('unit_cost') or 0),
+                            'addition_cost': float(r.get('addition_cost') or 0),
+                            'addition_cost_fmt': f"RM {float(r.get('addition_cost') or 0):,.2f}",
+                            'depreciation_rate': r.get('depreciation_rate') or 0,
+                            'purchase_date': r.get('purchase_date') or '',
+                            'purchase_year': r.get('purchase_year'),
+                        }
+                        item['_search'] = _addition_search_blob(item)
+                        rendered.append(item)
+                    additions_cache.clear()
+                    additions_cache.extend(rendered)
+                    apply_additions_filter()
+                except Exception as e:
+                    ui.notify(f'Could not load additions: {e}', type='negative')
 
             def refresh_reports():
-                asset_table.rows = get_assets()
-                asset_table.update()
+                rows = get_assets()
+                for r in rows:
+                    r['_search'] = _asset_search_blob(r)
+                main_assets_cache.clear()
+                main_assets_cache.extend(rows)
+                apply_main_filter()
+                load_additions()
+
+            def edit_addition(row):
+                try:
+                    parent_opts = build_parent_options()
+                except Exception:
+                    parent_opts = {}
+                try:
+                    rate_opts = get_rate_options()
+                except Exception:
+                    rate_opts = {}
+                with ui.dialog() as d, ui.card().classes('w-full max-w-2xl bg-white border border-stone-200 shadow-none rounded-sm p-8 mx-auto'):
+                    ui.label(f"Edit Addition: {row.get('description', '')}").classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-6 w-full')
+
+                    e_parent = ui.select(parent_opts, label='Parent Asset', value=row.get('parent_asset_id') if row.get('parent_asset_id') in parent_opts else None, with_input=True).classes('w-full mb-4').props('outlined dense')
+                    e_desc = ui.input('Description', value=row.get('description', '')).classes('w-full mb-4').props('outlined dense')
+                    e_remarks = ui.input('Remarks', value=row.get('remarks', '')).classes('w-full mb-4').props('outlined dense')
+
+                    def update_e_total():
+                        try:
+                            q = float(e_qty.value) if e_qty.value else 0.0
+                            u = float(e_unit.value) if e_unit.value else 0.0
+                            e_total.value = round(q * u, 2)
+                        except (ValueError, TypeError):
+                            pass
+
+                    with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                        e_qty = ui.number('Qty', value=row.get('quantity', 1), min=1, format='%d', on_change=update_e_total).classes('w-1/4').props('outlined dense')
+                        e_unit = ui.number('Unit Cost (RM)', value=row.get('unit_cost', 0.0), format='%.2f', on_change=update_e_total).classes('flex-1').props('outlined dense')
+                        e_total = ui.number('Addition Cost (RM)', value=row.get('addition_cost', 0.0), format='%.2f').classes('flex-1').props('outlined dense')
+
+                    rate_val = row.get('depreciation_rate', 0.0)
+                    with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                        e_rate = ui.select(rate_opts, label='Depreciation Rate', value=rate_val if rate_val in rate_opts else None, with_input=True).classes('w-1/2').props('outlined dense')
+                        e_year = ui.number('Year of Purchase', value=row.get('purchase_year') or date.today().year, format='%d').classes('w-1/2').props('outlined dense readonly')
+
+                    def update_e_year_from_date():
+                        try:
+                            e_year.value = int(e_date.value[:4])
+                        except (ValueError, TypeError):
+                            pass
+
+                    with ui.row().classes('w-full mb-4'):
+                        e_date = ui.input('Date of Purchase', value=row.get('purchase_date') or str(date.today()), on_change=lambda: update_e_year_from_date()).classes('w-full').props('outlined dense')
+                        with e_date:
+                            with ui.menu().props('no-parent-event') as e_menu:
+                                with ui.date().bind_value(e_date) as _:
+                                    with ui.row().classes('justify-end'):
+                                        ui.button('Close', on_click=e_menu.close).props('flat')
+                            with e_date.add_slot('append'):
+                                ui.icon('edit_calendar').on('click', e_menu.open).classes('cursor-pointer')
+
+                    def save_edit():
+                        try:
+                            supabase.table('asset_additions').update({
+                                'parent_asset_id': e_parent.value,
+                                'description': e_desc.value,
+                                'remarks': e_remarks.value,
+                                'quantity': int(e_qty.value) if e_qty.value else 1,
+                                'unit_cost': float(e_unit.value) if e_unit.value else 0.0,
+                                'addition_cost': float(e_total.value) if e_total.value else 0.0,
+                                'depreciation_rate': float(e_rate.value) if e_rate.value else 0.0,
+                                'purchase_date': e_date.value,
+                                'purchase_year': int(e_year.value) if e_year.value else None,
+                            }).eq('id', row['id']).execute()
+                            ui.notify('Addition updated', type='positive', position='top')
+                            load_additions()
+                            d.close()
+                        except Exception as ex:
+                            ui.notify(f'Database error: {ex}', type='negative')
+
+                    ui.button('Update Addition', on_click=save_edit).classes('w-full py-2 tracking-wide font-light bg-[#7F0019] text-white').props('unelevated')
+                d.open()
+
+            def delete_addition(row):
+                with ui.dialog() as confirm_dlg, ui.card().classes('p-6 bg-white border border-stone-200 shadow-none rounded-sm'):
+                    ui.label('Confirm Deletion').classes('text-lg tracking-wide text-stone-800 border-b border-stone-100 pb-2 mb-4 w-full')
+                    ui.label(f"Delete addition \"{row.get('description', '')}\" from {row.get('parent_name', '')}?").classes('text-stone-600 mb-6')
+                    with ui.row().classes('w-full gap-4 justify-end'):
+                        ui.button('Cancel', on_click=confirm_dlg.close).props('flat').classes('text-stone-500')
+                        def do_delete():
+                            try:
+                                supabase.table('asset_additions').delete().eq('id', row['id']).execute()
+                                ui.notify('Addition deleted', type='warning', position='top')
+                                load_additions()
+                                confirm_dlg.close()
+                            except Exception as ex:
+                                ui.notify(f'Delete error: {ex}', type='negative')
+                        ui.button('Delete', on_click=do_delete).classes('bg-red-700 text-white').props('unelevated')
+                confirm_dlg.open()
+
+            additions_table.on('edit', lambda msg: edit_addition(msg.args))
+            additions_table.on('delete', lambda msg: delete_addition(msg.args))
+
+            # Initial seed: populate both caches and render filtered (empty filter = all rows).
+            refresh_reports()
 
             def edit_asset(row):
                 try:
@@ -1572,4 +1678,9 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
 
 # --- RUN THE APP ---
 port = int(os.environ.get("PORT", 8080))
-ui.run(title="Asset App", host="0.0.0.0", port=port)
+ui.run(
+    title='Mega Jutamas — Fixed Asset Register',
+    favicon=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'favicon.svg'),
+    host='0.0.0.0',
+    port=port,
+)
