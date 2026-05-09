@@ -84,6 +84,11 @@ def get_assets():
 
 COMPANY_NAME = 'MEGA JUTAMAS SDN BHD (663951-U)'
 
+# Residual value retained on each in-service asset (and each addition).
+# Depreciation is capped so NBV bottoms at this amount until the asset is
+# actually disposed — at which point the cost moves out via the disposal column.
+RESIDUAL_VALUE = 1.0
+
 def _resolve_purchase_year(asset):
     py = asset.get('purchase_year')
     if py:
@@ -212,7 +217,9 @@ def _build_addition_row(add, parent_a, year, month, parent_disp_y, parent_disp_m
         acc_dep_bf = acc_dep_full_BF
         acc_dep_disposal = 0.0
         current_charge = max(acc_dep_full_at_period - acc_dep_bf, 0.0)
-        current_charge = min(current_charge, max(cost_cf - acc_dep_bf, 0.0))
+        # Floor: in-service additions retain RESIDUAL_VALUE NBV until disposed.
+        residual = RESIDUAL_VALUE if cost_cf > 0 else 0.0
+        current_charge = min(current_charge, max(cost_cf - acc_dep_bf - residual, 0.0))
         acc_dep_cf = acc_dep_bf + current_charge
 
     nbv_current = cost_cf - acc_dep_cf
@@ -325,8 +332,13 @@ def compute_period_rows(year, month):
         current_charge = max(
             acc_dep_full_at_period - past_disp_acc_dep - period_disp_acc_dep - acc_dep_bf, 0.0
         )
-        # Cap so NBV doesn't go negative
-        current_charge = min(current_charge, max(cost_cf - (acc_dep_bf - acc_dep_disposal), 0.0))
+        # Cap so NBV bottoms at RESIDUAL_VALUE for in-service assets,
+        # or at 0 for fully-disposed ones (cost_cf == 0).
+        residual = RESIDUAL_VALUE if cost_cf > 0 else 0.0
+        current_charge = min(
+            current_charge,
+            max(cost_cf - (acc_dep_bf - acc_dep_disposal) - residual, 0.0),
+        )
         monthly_charge = monthly_charge_full
         acc_dep_cf = acc_dep_bf - acc_dep_disposal + current_charge
 
@@ -681,6 +693,30 @@ with ui.column().classes('w-full max-w-5xl mx-auto mt-8 px-4'):
                 with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
                     rate_select = ui.select(get_rate_options(), label='Depreciation Rate', with_input=True).classes('w-1/2').props('outlined dense')
                     status = ui.select(['Active', 'Disposed'], value='Active', label='Status').classes('w-1/2').props('outlined dense')
+
+                # Date of Purchase + Year of Purchase
+                def update_purchase_year_from_date():
+                    try:
+                        purchase_year_input.value = int(purchase_date_input.value[:4])
+                    except (ValueError, TypeError):
+                        pass
+
+                with ui.row().classes('w-full gap-4 mb-4 flex-nowrap'):
+                    purchase_year_input = ui.number(
+                        'Year of Purchase', value=date.today().year, format='%d'
+                    ).classes('w-1/2').props('outlined dense readonly')
+                    purchase_date_input = ui.input(
+                        'Date of Purchase',
+                        value=str(date.today()),
+                        on_change=lambda: update_purchase_year_from_date(),
+                    ).classes('w-1/2').props('outlined dense')
+                    with purchase_date_input:
+                        with ui.menu().props('no-parent-event') as _purchase_date_menu:
+                            with ui.date().bind_value(purchase_date_input) as _:
+                                with ui.row().classes('justify-end'):
+                                    ui.button('Close', on_click=_purchase_date_menu.close).props('flat')
+                        with purchase_date_input.add_slot('append'):
+                            ui.icon('edit_calendar').on('click', _purchase_date_menu.open).classes('cursor-pointer')
 
                 # Tiny refresh button so staff can sync the dropdowns if maintenance was updated
                 with ui.row().classes('w-full justify-end mb-4'):
