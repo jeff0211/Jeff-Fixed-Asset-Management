@@ -1,6 +1,4 @@
 nicegui
 supabase
 python-dotenv
-text
-openpyxl
 openpyxl
