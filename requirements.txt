@@ -1,4 +1,0 @@
-nicegui
-supabase
-python-dotenv
-openpyxl
