@@ -1,0 +1,35 @@
+# Secrets for the Python (NiceGUI) backend — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# Note: docs/config.js IS safe to commit (anon key + RLS).
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+
+# Database files (legacy / local)
+*.db
+*.sqlite
+*.sqlite3
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Build / temp
+*.log
+*.tmp
+scratch.py
+
+# Generated reports + sample files (local only)
+Fixed_Asset_Register_*.xlsx
+*.xls
+*.xlsx

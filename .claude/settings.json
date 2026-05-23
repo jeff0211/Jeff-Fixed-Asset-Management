@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -i \"env\\\\|\\\\\\\\.\")",
+      "Bash(pip --version)",
+      "Bash(pip install *)",
+      "Bash(python -c \"import nicegui, supabase, dotenv; print\\('nicegui', nicegui.__version__, '| supabase OK | dotenv OK'\\)\")",
+      "Bash(python main.py)",
+      "Bash(python _inspect_xls.py)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \":8080 :8000 :3000 :5000\")",
+      "Bash(findstr \"LISTENING\")",
+      "Bash(python -m py_compile main.py)",
+      "Bash(curl -s -o /dev/null -w \"HTTP=%{http_code}\\\\n\" http://localhost:8080)"
+    ]
+  }
+}
