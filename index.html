@@ -417,7 +417,9 @@
           <select x-model.number="report.month"
                   class="w-36 px-2 py-1 border border-stone-300 rounded text-sm bg-white focus:outline-none focus:border-[#7F0019]">
             <template x-for="m in MONTHS" :key="m[0]">
-              <option :value="m[0]" x-text="`${String(m[0]).padStart(2,'0')} - ${m[1]}`"></option>
+              <option :value="m[0]"
+                      :selected="report.month === m[0]"
+                      x-text="`${String(m[0]).padStart(2,'0')} - ${m[1]}`"></option>
             </template>
           </select>
           <button @click="generateReport()" :disabled="report.generating"

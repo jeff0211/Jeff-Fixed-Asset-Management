@@ -283,7 +283,8 @@ async function buildPeriodWorkbook(rows, year, month) {
     }
     ws.getCell(rowIdx, 2).value = r.reference;
     ws.getCell(rowIdx, 3).value = r.unit;
-    ws.getCell(rowIdx, 4).value = r.location;
+    // Column 4 (LOCATION) is intentionally left blank for now — will hold
+    // per-asset location detail (e.g. "Shelf B-3") added in a later iteration.
     const rateCell = ws.getCell(rowIdx, 5);
     rateCell.value = r.depreciation_rate;
     rateCell.numFmt = RATE_FMT;
@@ -331,7 +332,11 @@ async function buildPeriodWorkbook(rows, year, month) {
 
     const locations = Object.keys(grouped[category]).sort();
     for (const location of locations) {
-      const locCell = ws.getCell(curRow, 4);
+      // Blank separator row before every location header
+      applyBorder(curRow);
+      curRow++;
+
+      const locCell = ws.getCell(curRow, 1);   // column A — sits above the asset list
       locCell.value = location;
       locCell.font = { bold: true };
       applyBorder(curRow);
@@ -365,9 +370,12 @@ async function buildPeriodWorkbook(rows, year, month) {
       writeSubtotalRow(curRow, `Subtotal — ${location}`, locTotals, { italic: true });
       for (const f of SUM_FIELDS) catTotals[f] += locTotals[f];
       curRow++;
-      applyBorder(curRow); // continuous gap
-      curRow++;
+      // (removed post-location blank — next iteration's pre-location blank handles spacing)
     }
+
+    // Blank row before the category total
+    applyBorder(curRow);
+    curRow++;
 
     writeSubtotalRow(curRow, `TOTAL ${category}`, catTotals, { bold: true });
     for (const f of SUM_FIELDS) grandTotals[f] += catTotals[f];
