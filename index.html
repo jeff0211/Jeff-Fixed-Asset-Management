@@ -775,7 +775,7 @@
                     x-text="editingAssetSaving ? 'Saving…' : 'Update Record'"></button>
           </div>
           <button @click="confirmDeleteAssetFromEdit()"
-                  class="w-full py-2 mt-2 text-sm text-red-700 hover:bg-red-50 rounded">
+                  class="w-full py-2 mt-2 text-sm text-[#7F0019] bg-red-50/60 border border-[#7F0019]/30 rounded hover:bg-red-100/70 hover:border-[#7F0019]/60 transition-colors">
             Delete Record
           </button>
         </div>
@@ -882,6 +882,10 @@
                     class="flex-1 py-2 bg-[#7F0019] text-white text-sm tracking-wide rounded disabled:opacity-50 hover:bg-[#6a0015] transition-colors"
                     x-text="editingAdditionSaving ? 'Saving…' : 'Update Addition'"></button>
           </div>
+          <button @click="confirmDeleteAdditionFromEdit()"
+                  class="w-full py-2 mt-2 text-sm text-[#7F0019] bg-red-50/60 border border-[#7F0019]/30 rounded hover:bg-red-100/70 hover:border-[#7F0019]/60 transition-colors">
+            Delete Addition
+          </button>
         </div>
       </template>
     </div>

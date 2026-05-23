@@ -1143,6 +1143,15 @@ document.addEventListener('alpine:init', () => {
     confirmDeleteAddition(row) {
       this.deletingAddition = { id: row.id, description: row.description, parent_name: row.parent_name };
     },
+    confirmDeleteAdditionFromEdit() {
+      if (!this.editingAddition) return;
+      const parent = this.activeAssets.find(a => a.id === this.editingAddition.parentId);
+      this.deletingAddition = {
+        id: this.editingAddition.id,
+        description: this.editingAddition.description,
+        parent_name: parent?.name || '—',
+      };
+    },
     async deleteAddition() {
       if (!this.deletingAddition) return;
       try {
@@ -1150,6 +1159,7 @@ document.addEventListener('alpine:init', () => {
         if (error) throw error;
         this.notify('Addition deleted', 'positive');
         this.deletingAddition = null;
+        this.editingAddition = null;     // close edit modal if delete came from there
         await this.loadAdditions();
       } catch (err) {
         console.error('deleteAddition:', err);
