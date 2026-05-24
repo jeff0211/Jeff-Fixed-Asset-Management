@@ -317,6 +317,26 @@ async function buildPeriodWorkbook(rows, year, month) {
     applyBorder(rowIdx);
   }
 
+  // Location subtotal: no label, just numbers with top+bottom borders
+  // on the numeric columns (from F = cost B/F onwards).
+  function writeLocationSubtotalRow(rowIdx, totals) {
+    const italicFont = { italic: true };
+    for (const [f, col] of Object.entries(FIELD_TO_COL)) {
+      const cell = ws.getCell(rowIdx, col);
+      cell.value = Math.round(totals[f] * 100) / 100;
+      cell.font = italicFont;
+      cell.numFmt = MONEY_FMT;
+    }
+    applyBorder(rowIdx);  // vertical borders for all columns
+    // Layer top + bottom borders on the numeric range (F onwards) without
+    // clobbering the vertical borders already set.
+    const firstNumericCol = Math.min(...Object.values(FIELD_TO_COL));   // = 6 (column F)
+    for (let c = firstNumericCol; c <= LAST_COL; c++) {
+      const cell = ws.getCell(rowIdx, c);
+      cell.border = { ...cell.border, top: thin, bottom: thin };
+    }
+  }
+
   const grandTotals = Object.fromEntries(SUM_FIELDS.map(f => [f, 0]));
   let curRow = 8;
 
@@ -357,20 +377,14 @@ async function buildPeriodWorkbook(rows, year, month) {
           for (const f of SUM_FIELDS) locTotals[f] += addRow[f];
           curRow++;
         }
-
-        if (additions.length > 0) {
-          const psub = Object.fromEntries(
-            SUM_FIELDS.map(f => [f, parentRow[f] + additions.reduce((s, a) => s + a[f], 0)])
-          );
-          writeSubtotalRow(curRow, `Subtotal — ${parentRow.description}`, psub, { italic: true });
-          curRow++;
-        }
+        // (parent + additions per-asset subtotal row removed per request)
       }
 
-      writeSubtotalRow(curRow, `Subtotal — ${location}`, locTotals, { italic: true });
+      // Location subtotal: no text label, numbers only, top+bottom borders
+      writeLocationSubtotalRow(curRow, locTotals);
       for (const f of SUM_FIELDS) catTotals[f] += locTotals[f];
       curRow++;
-      // (removed post-location blank — next iteration's pre-location blank handles spacing)
+      // (no post-location blank — next iteration's pre-location blank handles spacing)
     }
 
     // Blank row before the category total
