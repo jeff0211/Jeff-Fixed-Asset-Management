@@ -175,6 +175,10 @@
           </select>
         </div>
 
+        <input x-model="newAsset.locationDetail" type="text"
+               placeholder="Location Detail (e.g. Shelf B-3, Room 204)"
+               class="w-full px-3 py-2 mb-4 border border-stone-300 rounded text-sm focus:outline-none focus:border-[#7F0019]" />
+
         <div class="grid grid-cols-4 gap-4 mb-4">
           <div>
             <label class="text-xs text-stone-500">Qty</label>
@@ -709,6 +713,10 @@
               </template>
             </select>
           </div>
+
+          <input x-model="editingAsset.locationDetail" type="text"
+                 placeholder="Location Detail (e.g. Shelf B-3, Room 204)"
+                 class="w-full px-3 py-2 mb-4 border border-stone-300 rounded text-sm focus:outline-none focus:border-[#7F0019]" />
 
           <div class="grid grid-cols-4 gap-4 mb-4">
             <div>

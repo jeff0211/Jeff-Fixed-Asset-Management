@@ -19,6 +19,7 @@ CREATE TABLE public.assets (
   purchase_year numeric,
   quantity integer DEFAULT 1,                  -- 2026-04-29: added
   unit_cost numeric(12,2) DEFAULT 0,           -- 2026-04-29: added
+  location_detail text,                         -- 2026-05-25: added (free-text; e.g. "Shelf B-3")
   CONSTRAINT assets_pkey PRIMARY KEY (id),
   CONSTRAINT assets_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id),
   CONSTRAINT assets_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id)
@@ -29,6 +30,8 @@ CREATE TABLE public.assets (
 --   ALTER TABLE assets DROP CONSTRAINT assets_asset_tag_key;
 --   ALTER TABLE assets ADD COLUMN quantity INTEGER DEFAULT 1;
 --   ALTER TABLE assets ADD COLUMN unit_cost NUMERIC(12,2) DEFAULT 0;
+-- Migration 2026-05-25 (RUN THIS IN SUPABASE SQL EDITOR BEFORE THE APP UPDATE):
+--   ALTER TABLE public.assets ADD COLUMN location_detail text;
 
 CREATE TABLE public.categories (
   id integer NOT NULL DEFAULT nextval('categories_id_seq'::regclass),

@@ -145,6 +145,7 @@ function buildAdditionRow(add, parentA, year, month, parentDispY, parentDispM) {
   return {
     category: parentA.categories?.name || 'Uncategorized',
     location: parentA.locations?.name || 'No location',
+    location_detail: parentA.location_detail || '',   // inherit from parent
     description: `+ ${desc}`,
     reference: '',
     unit: add.quantity || 0,
@@ -283,8 +284,9 @@ async function buildPeriodWorkbook(rows, year, month) {
     }
     ws.getCell(rowIdx, 2).value = r.reference;
     ws.getCell(rowIdx, 3).value = r.unit;
-    // Column 4 (LOCATION) is intentionally left blank for now — will hold
-    // per-asset location detail (e.g. "Shelf B-3") added in a later iteration.
+    // Column 4 (LOCATION) — per-asset location detail (e.g. "Shelf B-3").
+    // Additions inherit their parent's value via _build_addition_row.
+    ws.getCell(rowIdx, 4).value = r.location_detail || '';
     const rateCell = ws.getCell(rowIdx, 5);
     rateCell.value = r.depreciation_rate;
     rateCell.numFmt = RATE_FMT;
@@ -454,7 +456,7 @@ document.addEventListener('alpine:init', () => {
 
     // ===== Forms (Add tab) =====
     newAsset: {
-      name: '', categoryId: null, locationId: null,
+      name: '', categoryId: null, locationId: null, locationDetail: '',
       qty: 1, unitCost: 0, depRate: null, status: 'Active',
       purchaseDate: todayISO(), remarks: '',
     },
@@ -655,6 +657,7 @@ document.addEventListener('alpine:init', () => {
         location_id: r.location_id || null,
         category: r.categories?.name || 'N/A',
         location: r.locations?.name || 'No location',
+        location_detail: r.location_detail || '',
         status: r.status || 'Active',
         purchase_cost: cost,
         priceFormatted: formatMoney(cost),
@@ -693,7 +696,7 @@ document.addEventListener('alpine:init', () => {
 
     buildAssetSearchBlob(a) {
       return [
-        a.name, a.category, a.location, a.status,
+        a.name, a.category, a.location, a.location_detail, a.status,
         a.priceFormatted, a.purchase_cost.toFixed(2),
         a.purchase_year || '', a.purchase_date || '',
         a.depreciation_rate ?? '', `qty ${a.quantity}`,
@@ -736,6 +739,7 @@ document.addEventListener('alpine:init', () => {
           remarks: a.remarks || null,
           category_id: a.categoryId || null,
           location_id: a.locationId || null,
+          location_detail: a.locationDetail || null,
           quantity: parseInt(a.qty, 10) || 1,
           unit_cost: Number(a.unitCost) || 0,
           purchase_cost: this.newAssetTotal,
@@ -757,7 +761,7 @@ document.addEventListener('alpine:init', () => {
     },
     resetNewAssetForm() {
       this.newAsset = {
-        name: '', categoryId: null, locationId: null,
+        name: '', categoryId: null, locationId: null, locationDetail: '',
         qty: 1, unitCost: 0, depRate: null, status: 'Active',
         purchaseDate: todayISO(), remarks: '',
       };
@@ -1045,6 +1049,7 @@ document.addEventListener('alpine:init', () => {
         name: row.name,
         categoryId: row.category_id ?? null,
         locationId: row.location_id ?? null,
+        locationDetail: row.location_detail || '',
         qty: row.quantity || 1,
         unitCost: row.unit_cost || 0,
         depRate: row.depreciation_rate ?? null,
@@ -1068,6 +1073,7 @@ document.addEventListener('alpine:init', () => {
           remarks: a.remarks || null,
           category_id: a.categoryId || null,
           location_id: a.locationId || null,
+          location_detail: a.locationDetail || null,
           quantity: parseInt(a.qty, 10) || 1,
           unit_cost: Number(a.unitCost) || 0,
           purchase_cost: this.editAssetTotal,
@@ -1219,7 +1225,7 @@ document.addEventListener('alpine:init', () => {
         this.supabase.from('assets').select(
           'id, name, quantity, unit_cost, purchase_cost, depreciation_rate, ' +
           'purchase_year, purchase_date, status, category_id, location_id, ' +
-          'remarks, categories(name), locations(name)'
+          'location_detail, remarks, categories(name), locations(name)'
         ),
         this.supabase.from('disposals').select('*'),
         this.supabase.from('asset_additions').select('*'),
@@ -1307,6 +1313,7 @@ document.addEventListener('alpine:init', () => {
         rows.push({
           category: a.categories?.name || 'Uncategorized',
           location: a.locations?.name || 'No location',
+          location_detail: a.location_detail || '',
           description: a.name || '',
           reference: '',
           unit: a.quantity || 0,
