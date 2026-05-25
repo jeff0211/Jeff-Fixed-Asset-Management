@@ -14,32 +14,55 @@ rates).
 
 | File | Purpose |
 |---|---|
-| `index.html` | Page skeleton, header, tabs, modals |
+| `index.html` | Landing / login + signup page (entry URL) |
+| `auth.js` | Sign-in / sign-up logic for index.html |
+| `home.html` | Main app — header, tabs, modals. Redirects to `index.html` if not logged in |
 | `app.js` | Alpine.js state, all data + form logic, Excel generator (ExcelJS) |
 | `styles.css` | Tab indicator, section banner, table, modal styles |
 | `config.example.js` | Template for Supabase credentials |
 | `config.js` | Your Supabase URL + anon key (already filled in for local) |
 | `favicon.svg` | Red ledger mark used as both browser icon and header logo |
 | `schema.sql` | Reference of Supabase table shapes |
-| `rls_policies.sql` | RLS policies — **run this in Supabase before deploying** |
+| `rls_policies.sql` | **Two-phase auth + per-owner RLS migration — run in Supabase** |
 
 ## One-time setup before going public
 
-### 1. Enable RLS on Supabase
+The app uses Supabase Auth (email/password). Each user only sees
+their own assets/additions/disposals; categories, locations, and
+depreciation rates are shared.
 
-Open Supabase → SQL Editor → run [`rls_policies.sql`](rls_policies.sql).
-**This is mandatory.** Without it, anyone who finds the deployed URL
-can read AND modify your data via the exposed anon key.
+### 1. Enable email auth in Supabase
 
-### 2. Confirm `config.js` has your project values
+Supabase dashboard → **Authentication → Providers → Email** → enable.
+(During testing, uncheck "Confirm email" so signup is instant.)
+
+### 2. Run Phase 1 SQL — BEFORE signing up
+
+Supabase → SQL Editor → run the **Phase 1** block in
+[`rls_policies.sql`](rls_policies.sql). This adds the `owner_id`
+column and turns on RLS with temporary open policies so the existing
+test data is still readable while you sign up.
+
+### 3. Visit the deployed app and sign up
+
+Open `index.html` (or `https://<you>.github.io/<repo>/`), click
+**Sign up**, create your account.
+
+### 4. Run Phase 2 SQL — AFTER signing up
+
+Back in Supabase → SQL Editor → run the **Phase 2** block in
+[`rls_policies.sql`](rls_policies.sql). This:
+- Backfills existing test rows to your user account
+- Locks down RLS so each user only sees their own data
+
+Done. New signups will see an empty register; you'll see your data.
+
+### 5. Confirm `config.js` has your project values
 
 `config.js` should already have your `SUPABASE_URL` and the anon
-public key. To deploy to a different Supabase project, edit those two
-values.
-
-> The anon key is **public** by design — Supabase intends it for
-> client-side use, paired with RLS policies. Do NOT paste the
-> `service_role` key here.
+public key. The anon key is **public** by design — Supabase intends
+it for client-side use, paired with RLS policies. Do NOT paste the
+`service_role` key.
 
 ## Local preview
 
@@ -61,16 +84,12 @@ GitHub → repo → **Settings → Pages**
 
 Live in ~1 minute at `https://<you>.github.io/<repo>/`.
 
-## Tightening security later
+## Auth notes
 
-When you're ready to add login (Supabase Auth — email/password):
-
-1. Supabase dashboard → Authentication → enable Email provider.
-2. Replace the public-write RLS policies (see `rls_policies.sql`
-   TIGHTENING section) with `TO authenticated` versions.
-3. Add a login form to `index.html` that calls
-   `supabase.auth.signInWithPassword(...)`. The Sign Out button in
-   the header is already there.
+- Sessions persist in localStorage — returning users stay signed in.
+- Visiting `home.html` without a session bounces to `index.html`.
+- Visiting `index.html` with an active session jumps straight to `home.html`.
+- Sign Out clears the session and returns to `index.html`.
 
 ## Tabs at a glance
 

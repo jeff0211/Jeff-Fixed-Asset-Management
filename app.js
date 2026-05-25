@@ -512,6 +512,9 @@ document.addEventListener('alpine:init', () => {
     toasts: [],
 
     // ===== Lifecycle =====
+    user: null,
+    userEmail: '',
+
     async init() {
       if (this.configMissing) return;
       try {
@@ -521,6 +524,21 @@ document.addEventListener('alpine:init', () => {
         this.configMissing = true;
         return;
       }
+
+      // Auth gate: if no active session, bounce to the login page.
+      const { data: { session } } = await this.supabase.auth.getSession();
+      if (!session) {
+        window.location.replace('index.html');
+        return;
+      }
+      this.user = session.user;
+      this.userEmail = session.user.email || '';
+
+      // Re-check on sign-out events from other tabs
+      this.supabase.auth.onAuthStateChange((_evt, sess) => {
+        if (!sess) window.location.replace('index.html');
+      });
+
       // Load disposal aggregates first so shapeAsset can attach qty_disposed
       await this.loadDisposalAggregates();
       await Promise.all([
@@ -530,6 +548,14 @@ document.addEventListener('alpine:init', () => {
         this.loadActiveAssets(),
         this.loadAvailableAssets(),
       ]);
+    },
+
+    async signOut() {
+      try {
+        await this.supabase.auth.signOut();
+      } finally {
+        window.location.replace('index.html');
+      }
     },
 
     async loadDisposalAggregates() {
