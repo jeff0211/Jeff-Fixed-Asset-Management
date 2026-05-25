@@ -1375,12 +1375,28 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ===== Derived (tables) =====
-    // ===== Dashboard KPIs =====
-    get kpiActiveCount()  { return this.assets.filter(a => a.status === 'Active').length; },
-    get kpiActiveValue()  { return this.assets.filter(a => a.status === 'Active').reduce((s, a) => s + (a.purchase_cost || 0), 0); },
-    get kpiDisposedCount(){ return this.assets.filter(a => a.status === 'Disposed').length; },
-    get kpiAdditionsCount(){ return this.additions.length; },
-    get kpiAdditionsValue(){ return this.additions.reduce((s, a) => s + (a.addition_cost || 0), 0); },
+    // ===== Dashboard KPIs (counted by quantity, not rows) =====
+    get kpiActiveCount() {
+      // Sum quantities across all active asset rows
+      return this.assets
+        .filter(a => a.status === 'Active')
+        .reduce((s, a) => s + (a.quantity || 0), 0);
+    },
+    get kpiActiveValue() {
+      return this.assets
+        .filter(a => a.status === 'Active')
+        .reduce((s, a) => s + (a.purchase_cost || 0), 0);
+    },
+    get kpiDisposedCount() {
+      // Total units ever disposed (across both Active and Disposed rows)
+      return this.assets.reduce((s, a) => s + (a.qty_disposed || 0), 0);
+    },
+    get kpiAdditionsCount() {
+      return this.additions.reduce((s, a) => s + (a.quantity || 0), 0);
+    },
+    get kpiAdditionsValue() {
+      return this.additions.reduce((s, a) => s + (a.addition_cost || 0), 0);
+    },
 
     get filteredAssets() {
       const q = (this.searchQuery || '').toLowerCase().trim();
