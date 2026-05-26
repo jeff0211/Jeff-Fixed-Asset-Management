@@ -162,7 +162,9 @@ function buildAdditionRow(add, parentA, year, month, parentDispY, parentDispM) {
     acc_dep_transfer_in: 0,
     acc_dep_transfer_inout: 0,
     current_charge: currentCharge,
-    monthly_charge: monthlyChargeFull,
+    // Average per-month charge for the reporting period.
+    // Long-depreciated assets have current_charge = 0 → monthly_charge = 0.
+    monthly_charge: month > 0 ? currentCharge / month : 0,
     acc_dep_cf: accDepCf,
     nbv_current: nbvCurrent,
     nbv_prior: nbvPrior,
@@ -507,6 +509,23 @@ document.addEventListener('alpine:init', () => {
       month: new Date().getMonth() + 1,
       generating: false,
     },
+
+    // ===== Convert asset → addition state =====
+    convertingAsset: null,      // the source asset row
+    convertTargetParentId: null,
+    convertSaving: false,
+
+    // ===== Convert addition → asset state =====
+    convertingAddition: null,   // the source addition row
+    convertAdditionForm: { categoryId: null, locationId: null, locationDetail: '', status: 'Active' },
+    convertAdditionSaving: false,
+
+    // ===== Import state =====
+    importOpen: false,
+    importParsing: false,
+    importing: false,
+    importPreview: null,      // { assets, errors, periodDate, newCategories, newLocations }
+    importProgress: { done: 0, total: 0, skipped: 0 },
 
     // ===== Toasts =====
     toasts: [],
@@ -1356,7 +1375,9 @@ document.addEventListener('alpine:init', () => {
           acc_dep_transfer_in: 0,
           acc_dep_transfer_inout: 0,
           current_charge: currentCharge,
-          monthly_charge: monthlyChargeFull,
+          // Average per-month charge for the reporting period.
+          // Long-depreciated assets have current_charge = 0 → monthly_charge = 0.
+          monthly_charge: month > 0 ? currentCharge / month : 0,
           acc_dep_cf: accDepCf,
           nbv_current: nbvCurrent,
           nbv_prior: nbvPrior,
@@ -1372,6 +1393,431 @@ document.addEventListener('alpine:init', () => {
         }
       }
       return rows;
+    },
+
+    // ===== Convert Asset → Addition =====
+    openConvertAsset(row) {
+      // Block if asset has children (additions linked to it)
+      const childCount = this.additions.filter(a => a.parent_asset_id === row.id).length;
+      if (childCount > 0) {
+        this.notify(`Cannot convert: "${row.name}" has ${childCount} addition(s) linked to it. Reassign or delete them first.`, 'warning');
+        return;
+      }
+      // Block if asset has any disposal history
+      if ((this.disposalsByAsset[row.id] || 0) > 0) {
+        this.notify(`Cannot convert: "${row.name}" has disposal history. Convert is not supported for disposed assets.`, 'warning');
+        return;
+      }
+      this.convertingAsset = row;
+      this.convertTargetParentId = null;
+    },
+    cancelConvert() {
+      if (this.convertSaving) return;
+      this.convertingAsset = null;
+      this.convertTargetParentId = null;
+    },
+    async performConvert() {
+      const src = this.convertingAsset;
+      const parentId = this.convertTargetParentId;
+      if (!src || !parentId) {
+        this.notify('Please pick a parent asset.', 'warning');
+        return;
+      }
+      if (parentId === src.id) {
+        this.notify('Cannot pick the same asset as its own parent.', 'warning');
+        return;
+      }
+      this.convertSaving = true;
+      try {
+        // 1. Insert new addition row carrying over the source asset's data
+        const additionPayload = {
+          parent_asset_id: parentId,
+          description: src.name,
+          remarks: src.remarks || null,
+          quantity: src.quantity || 1,
+          unit_cost: src.unit_cost || 0,
+          addition_cost: src.purchase_cost || 0,
+          depreciation_rate: src.depreciation_rate ?? null,
+          purchase_date: src.purchase_date || todayISO(),
+          purchase_year: src.purchase_year || yearFromISO(src.purchase_date),
+        };
+        const ins = await this.supabase.from('asset_additions').insert(additionPayload);
+        if (ins.error) throw ins.error;
+
+        // 2. Delete the original asset row
+        const del = await this.supabase.from('assets').delete().eq('id', src.id);
+        if (del.error) throw del.error;
+
+        this.notify(`Converted "${src.name}" to an addition.`, 'positive');
+        this.convertingAsset = null;
+        this.convertTargetParentId = null;
+
+        // 3. Refresh all caches
+        await this.loadDisposalAggregates();
+        await Promise.all([
+          this.loadAssets(),
+          this.loadAdditions(),
+          this.loadActiveAssets(),
+          this.loadAvailableAssets(),
+        ]);
+      } catch (err) {
+        console.error('performConvert:', err);
+        this.notify(`Convert failed: ${err.message || err}`, 'negative');
+      } finally {
+        this.convertSaving = false;
+      }
+    },
+
+    // ===== Convert Addition → Main Asset =====
+    openConvertAddition(row) {
+      // Pre-fill category/location/location_detail from the parent
+      const parent = this.assets.find(a => a.id === row.parent_asset_id);
+      this.convertAdditionForm = {
+        categoryId: parent?.category_id ?? null,
+        locationId: parent?.location_id ?? null,
+        locationDetail: parent?.location_detail || '',
+        status: 'Active',
+      };
+      this.convertingAddition = row;
+    },
+    cancelConvertAddition() {
+      if (this.convertAdditionSaving) return;
+      this.convertingAddition = null;
+    },
+    async performConvertAddition() {
+      const src = this.convertingAddition;
+      const form = this.convertAdditionForm;
+      if (!src) return;
+      this.convertAdditionSaving = true;
+      try {
+        // 1. Insert a new asset row carrying over the addition's data
+        const payload = {
+          name: src.description,
+          remarks: src.remarks || null,
+          category_id: form.categoryId || null,
+          location_id: form.locationId || null,
+          location_detail: form.locationDetail || null,
+          quantity: src.quantity || 1,
+          unit_cost: src.unit_cost || 0,
+          purchase_cost: src.addition_cost || 0,
+          depreciation_rate: src.depreciation_rate ?? null,
+          purchase_date: src.purchase_date || todayISO(),
+          purchase_year: src.purchase_year || yearFromISO(src.purchase_date),
+          status: form.status || 'Active',
+        };
+        const ins = await this.supabase.from('assets').insert(payload);
+        if (ins.error) throw ins.error;
+
+        // 2. Delete the source addition row
+        const del = await this.supabase.from('asset_additions').delete().eq('id', src.id);
+        if (del.error) throw del.error;
+
+        this.notify(`Converted "${src.description}" into a main asset.`, 'positive');
+        this.convertingAddition = null;
+
+        // 3. Refresh caches
+        await this.loadDisposalAggregates();
+        await Promise.all([
+          this.loadAssets(),
+          this.loadAdditions(),
+          this.loadActiveAssets(),
+          this.loadAvailableAssets(),
+        ]);
+      } catch (err) {
+        console.error('performConvertAddition:', err);
+        this.notify(`Convert failed: ${err.message || err}`, 'negative');
+      } finally {
+        this.convertAdditionSaving = false;
+      }
+    },
+
+    // ===== Excel Import =====
+    openImport() {
+      this.importPreview = null;
+      this.importProgress = { done: 0, total: 0, skipped: 0 };
+      this.importOpen = true;
+    },
+    cancelImport() {
+      if (this.importing) return;
+      this.importOpen = false;
+      this.importPreview = null;
+    },
+
+    async onImportFileSelected(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (typeof XLSX === 'undefined') {
+        this.notify('Excel parser library not loaded — refresh the page.', 'negative');
+        return;
+      }
+      this.importParsing = true;
+      try {
+        this.importPreview = await this.parseImportFile(file);
+      } catch (err) {
+        console.error('Import parse:', err);
+        this.notify(`Could not parse file: ${err.message || err}`, 'negative');
+      } finally {
+        this.importParsing = false;
+        event.target.value = ''; // allow re-picking the same file later
+      }
+    },
+
+    async parseImportFile(file) {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array', cellDates: false });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+
+      // Look for "AS AT dd.mm.yyyy" in any of the first 10 rows
+      let periodDate = null;
+      for (let r = 0; r < Math.min(rows.length, 10); r++) {
+        const cell = String(rows[r][0] || '');
+        const m = cell.match(/AS AT\s+(\d{2})\.(\d{2})\.(\d{4})/i);
+        if (m) { periodDate = `${m[3]}-${m[2]}-${m[1]}`; break; }
+      }
+
+      // Find data start: skip rows until we hit one with at least 4-space-indent in col A
+      let dataStart = 0;
+      for (let r = 0; r < Math.min(rows.length, 20); r++) {
+        const a = String(rows[r][0] || '');
+        if (a.length > 0 && a !== a.trimStart()) { dataStart = r; break; }
+        // also accept the first row of headers ending → look for first 0-indent text that's not a title
+        if (/^[A-Z]/.test(a.trimStart()) && rows[r + 1] && String(rows[r + 1][0] || '').startsWith('    ')) {
+          dataStart = r; break;
+        }
+      }
+      if (dataStart === 0) dataStart = 8; // fallback
+
+      const out = { assets: [], errors: [], periodDate, newCategories: [], newLocations: [] };
+      const existingCatNames = new Set(this.cats.map(c => c.name.toUpperCase()));
+      const existingLocNames = new Set(this.locs.map(l => l.name.toUpperCase()));
+
+      let currentCategory = null;
+      let currentLocation = null;
+      let lastAsset = null;
+
+      for (let r = dataStart; r < rows.length; r++) {
+        const row = rows[r];
+        const colA = String(row[0] ?? '');
+        if (!colA.trim()) { lastAsset = null; continue; }
+
+        const trimmed = colA.trim();
+        const leading = colA.length - colA.trimStart().length;
+
+        // Skip subtotal / total / grand total lines
+        if (/^TOTAL\s|^GRAND\s+TOTAL|^Subtotal\s/i.test(trimmed)) continue;
+
+        // Continuation line: deeper indent (6+), no numeric data → append to previous
+        if (leading >= 6 && lastAsset) {
+          const hasNum = [2, 5, 6, 7, 11].some(c => typeof row[c] === 'number' && row[c] !== 0);
+          if (!hasNum) {
+            lastAsset.name = `${lastAsset.name} ${trimmed}`.trim();
+            continue;
+          }
+        }
+
+        // 0-indent: category or location header
+        if (leading === 0) {
+          const isAllCaps = trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed);
+          if (isAllCaps) {
+            currentCategory = trimmed;
+            currentLocation = null;
+            if (!existingCatNames.has(trimmed.toUpperCase()) && !out.newCategories.includes(trimmed)) {
+              out.newCategories.push(trimmed);
+            }
+          } else {
+            currentLocation = trimmed;
+            if (!existingLocNames.has(trimmed.toUpperCase()) && !out.newLocations.includes(trimmed)) {
+              out.newLocations.push(trimmed);
+            }
+          }
+          lastAsset = null;
+          continue;
+        }
+
+        // Indented row → asset or addition
+        const isAddition = trimmed.startsWith('+ ');
+        const name = isAddition ? trimmed.slice(2).trim() : trimmed;
+
+        // Pull values from the row, leaving missing ones as null (no synthetic defaults)
+        const num = (v) => (typeof v === 'number' && !isNaN(v)) ? v : (v === '' || v === null || v === undefined ? null : Number(v) || null);
+        const str = (v) => (v === null || v === undefined) ? null : String(v).trim() || null;
+
+        const item = {
+          rowNum: r + 1,
+          isAddition,
+          parentName: isAddition && lastAsset ? lastAsset.name : null,
+          name,
+          category: currentCategory,
+          location: currentLocation,
+          location_detail: str(row[3]),
+          quantity: num(row[2]),
+          depreciation_rate: (() => { const d = num(row[4]); return d === null ? null : d * 100; })(),
+          purchase_year: num(row[5]),
+          purchase_cost: num(row[11]) ?? num(row[6]),   // prefer cost C/F, else cost B/F
+          cost_disposal: num(row[8]) || 0,
+        };
+
+        out.assets.push(item);
+        if (!isAddition) lastAsset = item;
+      }
+      return out;
+    },
+
+    async performImport() {
+      if (!this.importPreview) return;
+      this.importing = true;
+      const { assets: parsed, periodDate } = this.importPreview;
+      const errors = [];
+      let done = 0;
+      let skipped = 0;
+      this.importProgress = { done: 0, total: parsed.length, skipped: 0 };
+
+      // Build live lookups (refetched in case cats/locs were edited in another tab)
+      try { await this.loadDropdowns(); } catch (_) {}
+      const catByName = Object.fromEntries(this.cats.map(c => [c.name.toUpperCase(), c.id]));
+      const locByName = Object.fromEntries(this.locs.map(l => [l.name.toUpperCase(), l.id]));
+
+      // Duplicate detection: name + location combo, against current assets
+      const existingKey = new Set(
+        this.assets.map(a => `${(a.name || '').toLowerCase().trim()}|${(a.location || '').toLowerCase().trim()}`)
+      );
+
+      const parents = parsed.filter(p => !p.isAddition);
+      const additions = parsed.filter(p => p.isAddition);
+      const insertedByName = {};
+
+      for (const p of parents) {
+        try {
+          // Ensure category exists
+          let catId = null;
+          if (p.category) {
+            const key = p.category.toUpperCase();
+            if (!catByName[key]) {
+              const { data, error } = await this.supabase
+                .from('categories').insert({ name: p.category }).select().single();
+              if (error) throw error;
+              catByName[key] = data.id;
+            }
+            catId = catByName[key];
+          }
+          // Ensure location exists
+          let locId = null;
+          if (p.location) {
+            const key = p.location.toUpperCase();
+            if (!locByName[key]) {
+              const { data, error } = await this.supabase
+                .from('locations').insert({ name: p.location }).select().single();
+              if (error) throw error;
+              locByName[key] = data.id;
+            }
+            locId = locByName[key];
+          }
+
+          // Duplicate skip
+          const dupKey = `${p.name.toLowerCase().trim()}|${(p.location || '').toLowerCase().trim()}`;
+          if (existingKey.has(dupKey)) {
+            skipped++;
+            this.importProgress.skipped = skipped;
+            done++; this.importProgress.done = done;
+            continue;
+          }
+
+          // Build payload — only include fields with actual data
+          const payload = { name: p.name };
+          if (catId) payload.category_id = catId;
+          if (locId) payload.location_id = locId;
+          if (p.location_detail) payload.location_detail = p.location_detail;
+          if (p.quantity !== null) payload.quantity = parseInt(p.quantity, 10);
+          if (p.purchase_cost !== null) payload.purchase_cost = p.purchase_cost;
+          if (p.quantity && p.purchase_cost !== null) payload.unit_cost = p.purchase_cost / p.quantity;
+          if (p.depreciation_rate !== null) payload.depreciation_rate = p.depreciation_rate;
+          if (p.purchase_year !== null) {
+            payload.purchase_year = parseInt(p.purchase_year, 10);
+            payload.purchase_date = `${parseInt(p.purchase_year, 10)}-01-01`;
+          } else {
+            // schema requires purchase_date — fall back to today if no year
+            payload.purchase_date = todayISO();
+          }
+          payload.status = (p.purchase_cost === 0) ? 'Disposed' : 'Active';
+
+          const { data: assetRow, error } = await this.supabase
+            .from('assets').insert(payload).select().single();
+          if (error) throw error;
+
+          insertedByName[p.name] = assetRow.id;
+
+          // If disposal value > 0 in the period, record one disposal
+          if (p.cost_disposal > 0 && periodDate) {
+            const periodYear = parseInt(periodDate.split('-')[0], 10);
+            const qtyDispGuess = p.quantity ? Math.max(1, Math.round(p.cost_disposal / (p.purchase_cost / p.quantity || 1))) : 1;
+            await this.supabase.from('disposals').insert({
+              asset_id: assetRow.id,
+              name: p.name,
+              quantity_disposed: qtyDispGuess,
+              unit_cost: p.cost_disposal / qtyDispGuess,
+              total_disposal_cost: p.cost_disposal,
+              disposal_date: periodDate,
+              disposal_year: periodYear,
+              status: 'Disposed',
+            });
+          }
+        } catch (err) {
+          errors.push(`R${p.rowNum} "${p.name}": ${err.message || err}`);
+        }
+        done++;
+        this.importProgress.done = done;
+      }
+
+      // Additions (after parents are inserted)
+      for (const a of additions) {
+        try {
+          const parentId = insertedByName[a.parentName];
+          if (!parentId) {
+            errors.push(`R${a.rowNum}: addition "${a.name}" — parent not found`);
+          } else {
+            const payload = {
+              parent_asset_id: parentId,
+              description: a.name,
+            };
+            if (a.quantity !== null) payload.quantity = parseInt(a.quantity, 10);
+            if (a.purchase_cost !== null) payload.addition_cost = a.purchase_cost;
+            if (a.quantity && a.purchase_cost !== null) payload.unit_cost = a.purchase_cost / a.quantity;
+            if (a.depreciation_rate !== null) payload.depreciation_rate = a.depreciation_rate;
+            if (a.purchase_year !== null) {
+              payload.purchase_year = parseInt(a.purchase_year, 10);
+              payload.purchase_date = `${parseInt(a.purchase_year, 10)}-01-01`;
+            } else {
+              payload.purchase_date = todayISO();
+            }
+            if (!payload.addition_cost) payload.addition_cost = 0; // NOT NULL in schema
+            await this.supabase.from('asset_additions').insert(payload);
+          }
+        } catch (err) {
+          errors.push(`R${a.rowNum} "${a.name}": ${err.message || err}`);
+        }
+        done++;
+        this.importProgress.done = done;
+      }
+
+      const inserted = done - skipped - errors.length;
+      const msg = `Imported ${inserted}, skipped ${skipped} duplicates${errors.length ? `, ${errors.length} errors (see console)` : ''}.`;
+      this.notify(msg, errors.length ? 'warning' : 'positive');
+      if (errors.length) console.warn('Import errors:\n' + errors.join('\n'));
+
+      // Refresh all caches
+      await this.loadDisposalAggregates();
+      await Promise.all([
+        this.loadAssets(),
+        this.loadAdditions(),
+        this.loadDropdowns(),
+        this.loadActiveAssets(),
+        this.loadAvailableAssets(),
+      ]);
+
+      this.importing = false;
+      this.importOpen = false;
+      this.importPreview = null;
     },
 
     // ===== Derived (tables) =====
