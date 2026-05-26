@@ -23,8 +23,6 @@ rates).
 | `config.js` | Your Supabase URL + anon key (already filled in for local) |
 | `favicon.svg` | Red ledger mark used as both browser icon and header logo |
 | `setup.sql` | **One-shot Supabase setup — tables + RLS in a single idempotent file** |
-| `schema.sql` | Schema reference only (don't run) |
-| `rls_policies.sql` | Superseded by `setup.sql` (placeholder) |
 
 ## Fresh setup (new Supabase project) — 4 steps
 
