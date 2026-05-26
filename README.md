@@ -22,47 +22,42 @@ rates).
 | `config.example.js` | Template for Supabase credentials |
 | `config.js` | Your Supabase URL + anon key (already filled in for local) |
 | `favicon.svg` | Red ledger mark used as both browser icon and header logo |
-| `schema.sql` | Reference of Supabase table shapes |
-| `rls_policies.sql` | **Two-phase auth + per-owner RLS migration — run in Supabase** |
+| `setup.sql` | **One-shot Supabase setup — tables + RLS in a single idempotent file** |
+| `schema.sql` | Schema reference only (don't run) |
+| `rls_policies.sql` | Superseded by `setup.sql` (placeholder) |
 
-## One-time setup before going public
+## Fresh setup (new Supabase project) — 4 steps
 
 The app uses Supabase Auth (email/password). Each user only sees
 their own assets/additions/disposals; categories, locations, and
 depreciation rates are shared.
 
-### 1. Enable email auth in Supabase
+### 1. Provision the database
+Supabase dashboard → **SQL Editor** → paste the entire contents of
+[`setup.sql`](setup.sql) → **Run**. This creates every table and
+RLS policy in one go. It's idempotent — re-running is safe.
 
-Supabase dashboard → **Authentication → Providers → Email** → enable.
-(During testing, uncheck "Confirm email" so signup is instant.)
+### 2. Enable email auth
+**Authentication → Providers → Email** → enable.
+(During testing, uncheck "Confirm email" for instant signup.)
 
-### 2. Run Phase 1 SQL — BEFORE signing up
+### 3. Configure URLs
+**Authentication → URL Configuration**:
+- **Site URL**: `https://<your-host>/`
+- **Redirect URLs**: `https://<your-host>/**`
+- (For local testing, also add `http://localhost:8000/**`)
 
-Supabase → SQL Editor → run the **Phase 1** block in
-[`rls_policies.sql`](rls_policies.sql). This adds the `owner_id`
-column and turns on RLS with temporary open policies so the existing
-test data is still readable while you sign up.
+### 4. Wire up `config.js`
+Edit [`config.js`](config.js) with your project values
+(**Project Settings → API**):
+```js
+window.SUPABASE_URL = 'https://<project-ref>.supabase.co';
+window.SUPABASE_KEY = '<anon public key>';
+```
+The anon key is **public** by design — Supabase intends it for
+client-side use, paired with RLS. Do NOT paste the `service_role` key.
 
-### 3. Visit the deployed app and sign up
-
-Open `index.html` (or `https://<you>.github.io/<repo>/`), click
-**Sign up**, create your account.
-
-### 4. Run Phase 2 SQL — AFTER signing up
-
-Back in Supabase → SQL Editor → run the **Phase 2** block in
-[`rls_policies.sql`](rls_policies.sql). This:
-- Backfills existing test rows to your user account
-- Locks down RLS so each user only sees their own data
-
-Done. New signups will see an empty register; you'll see your data.
-
-### 5. Confirm `config.js` has your project values
-
-`config.js` should already have your `SUPABASE_URL` and the anon
-public key. The anon key is **public** by design — Supabase intends
-it for client-side use, paired with RLS policies. Do NOT paste the
-`service_role` key.
+Open `index.html` → **Sign up** → start using.
 
 ## Local preview
 
